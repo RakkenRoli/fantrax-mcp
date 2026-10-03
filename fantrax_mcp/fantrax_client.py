@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 
 from .cache import TTLCache
-from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP
+from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP, TEAM_CODES
 from .config import Settings, nhl_abbrev
 from .standings import parse_schedule
 
@@ -170,18 +170,24 @@ class FantraxClient:
         return parse_schedule(await self.standings_schedule_raw(ttl))
 
     async def resolve_team(self, team: str = "me") -> tuple[str, str]:
+        """'me', a stable code (GTX, AVR...), a Fantrax teamId, or part of a team name."""
         teams = await self.teams()
-        if team == "me":
+        team = (team or "me").strip()
+        if team.casefold() == "me":
             if self.s.team_id:
                 return self.s.team_id, teams.get(self.s.team_id, self.s.team_name)
             team = self.s.team_name
+        for tid, code in TEAM_CODES.items():
+            if code == team.upper():
+                return tid, teams.get(tid, code)
         if team in teams:
             return team, teams[team]
         low = team.casefold()
         for tid, name in teams.items():
             if low in name.casefold():
                 return tid, name
-        raise ValueError(f"No team matching {team!r}. Teams: {sorted(teams.values())}")
+        known = sorted(f"{TEAM_CODES.get(t, t)} ({n})" for t, n in teams.items())
+        raise ValueError(f"No team matching {team!r}. Use a code, team id or name part: {known}")
 
     # ---------- metadata ----------
     async def _meta(self, group: str | None = None) -> dict:

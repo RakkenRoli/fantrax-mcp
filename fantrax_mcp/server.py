@@ -36,7 +36,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.2.0")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.2.1")
 ET = ZoneInfo("America/New_York")
 
 
@@ -52,7 +52,12 @@ def stamped(fn):
     """Add fetched_at / nhl_date to every tool response."""
     @functools.wraps(fn)
     async def wrapper(*args, **kwargs):
-        out = await fn(*args, **kwargs)
+        try:
+            out = await fn(*args, **kwargs)
+        except ValueError as e:
+            # Bad input (unknown team, week out of range...). Return the message instead of
+            # letting the MCP layer collapse it into a bare "Error executing tool".
+            out = {"error": str(e)}
         if isinstance(out, dict):
             return {**out, **fetch_stamp()}
         return out
@@ -96,11 +101,7 @@ def roster_counts(players: list[dict]) -> dict:
 
 
 async def _resolve(team: str) -> tuple[str, str]:
-    """Like FX.resolve_team, but also accepts a stable team code (GTX, RSD, TN...)."""
-    up = team.strip().upper()
-    for tid, code in TEAM_CODES.items():
-        if code == up:
-            return tid, (await FX.teams()).get(tid, code)
+    """Team lookup by 'me', code (GTX, RSD, TN...), id or name part — see FX.resolve_team."""
     return await FX.resolve_team(team)
 
 

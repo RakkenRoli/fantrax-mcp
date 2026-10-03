@@ -1,10 +1,7 @@
 """Tests built from real Fantrax response shapes captured 2026-09-27."""
 import asyncio
-import os
 from datetime import date
 
-os.environ.setdefault("FANTRAX_LEAGUE_ID", "test")
-os.environ.setdefault("FANTRAX_COOKIE_FILE", os.path.join(os.path.dirname(__file__), "cookies.json"))
 
 from fantrax_mcp.config import current_week, parse_periods
 from fantrax_mcp.fantrax_client import _cell_value, flatten_rows

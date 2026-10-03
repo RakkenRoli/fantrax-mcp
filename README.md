@@ -21,11 +21,13 @@ Caddy, and is consumed by Claude Desktop through `mcp-remote`.
 | `league_lineup_capacity(week, from_date)` | Compact lineup sim for all 13 teams in one call |
 | `evaluate_add_drop(add, drop, week, ...)` | Net usable starts from a swap |
 | `goalie_check(week, team, start_share, ...)` | Projected goalie starts vs 3-game minimum, any team |
+| `get_league_standings()` | Standings in COMBINED order: division + division rank, W-L-T, pts, win%, div record, GB, category points for/against (include the in-progress week) |
 | `session_health()` | Login validity, cookie expiry, category-map drift; `ok=false` = don't publish |
 | `fantrax_raw(method, data, period, ...)` | Allowlisted read-only passthrough; `period` slims `getStandings`, ids labeled |
 
 Every dict response carries `fetched_at` (UTC) and `nhl_date` (US-Eastern date).
 `team` arguments accept `me`, a Fantrax team id, a stable code (`GTX`, `RSD`, `TN`...) or part of a name.
+Bad input (unknown team, week out of range) returns `{"error": "..."}` instead of failing the call.
 
 ### Data sources
 
@@ -99,6 +101,21 @@ Also check the week calendar from `league_info` against Fantrax's schedule page
 ```bash
 .venv/bin/pip install pytest && .venv/bin/python -m pytest -q tests
 ```
+
+Tests are isolated by `tests/conftest.py`: the cookie path is forced to the committed
+`tests/fixtures/dummy_session.json` (or a per-test `tmp_path` copy), even when the service
+env is loaded in the shell. No test reads or writes `/etc/fantrax-mcp/`.
+
+Real `getStandings` fixtures for `test_league_standings.py` come from
+`scripts/capture_standings_fixtures.py --out /tmp/fixtures` (run where the login works,
+then commit the files to `tests/fixtures/`); until then those tests are skipped.
+
+## Breaking changes for the website code
+
+- **0.2.1** — tools no longer raise on bad input: an unknown `team` or out-of-range `week`
+  returns `{"error": "...", "fetched_at", "nhl_date"}`. Check for `error` before reading fields.
+- **0.2.1** — new tool `get_league_standings()`; `team` codes now work in every tool that
+  takes `team` (previously `get_roster` and `lineup_capacity` rejected codes like `AVR`).
 
 ## Troubleshooting
 

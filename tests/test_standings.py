@@ -1,14 +1,10 @@
 """Real getStandings(view=SCHEDULE) response captured 2026-10-03 (week 1 in progress)."""
 import asyncio
 import json
-import os
 from pathlib import Path
 
 import pytest
 
-os.environ.setdefault("FANTRAX_LEAGUE_ID", "test")
-os.environ.setdefault("FANTRAX_COOKIE_FILE", os.path.join(os.path.dirname(__file__), "cookies.json"))
-Path(os.environ["FANTRAX_COOKIE_FILE"]).write_text('{"x":"y"}')
 
 from fantrax_mcp.categories import (ALL_SCIP, GOALIE_SCIP, SKATER_SCIP, TEAM_CODES,  # noqa: E402
                                     check_against_live, label, label_keys)
@@ -119,9 +115,6 @@ def server(monkeypatch):
     async def teams():
         return {k: v["name"] for k, v in RAW["fantasyTeamInfo"].items()}
 
-    async def resolve(team="me"):
-        return GTX, "Gazdagréti Taxisok"
-
     async def periods():
         return ["1 (Sep 29 - Oct 4)", "2 (Oct 5 - Oct 11)"]
 
@@ -130,7 +123,6 @@ def server(monkeypatch):
 
     monkeypatch.setattr(srv.FX, "schedule", schedule)
     monkeypatch.setattr(srv.FX, "teams", teams)
-    monkeypatch.setattr(srv.FX, "resolve_team", resolve)
     monkeypatch.setattr(srv.FX, "periods", periods)
     monkeypatch.setattr(srv.FX, "live_scoring", live)
     return srv

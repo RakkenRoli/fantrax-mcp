@@ -97,8 +97,8 @@ async def build_standings(call: Call,
         division, division_rank = division_of.get(tid, (None, None))
         rows.append({
             "rank": row["rank"],
-            "code": (code_for(tid, row["name"]) if code_for else None)
-                    or team_info.get(tid, {}).get("shortName"),
+            "code": (code_for(tid, team_info.get(tid, {}).get("shortName")) if code_for
+                     else team_info.get(tid, {}).get("shortName")),
             "team_id": tid,
             "name": row["name"],
             "division": division,
