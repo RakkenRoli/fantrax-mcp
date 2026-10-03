@@ -29,8 +29,8 @@ FX = FantraxClient(S)
 NHL = NHLClient()
 
 INSTRUCTIONS = f"""
-Read-only access to Mate's Fantrax NHL league (team: {S.team_name}) plus the NHL schedule.
-League: 13-team H2H categories, {ROSTER_SIZE}-man roster cap plus {IR_SLOTS} IR slots, {S.n_weeks} weeks ending {S.season_last_day}.
+Read-only access to the user's Fantrax NHL league (their team: {S.team_name or S.team_id}) plus the NHL schedule.
+League: H2H categories, {ROSTER_SIZE}-man roster cap plus {IR_SLOTS} IR slots, {S.n_weeks} weeks ending {S.season_last_day}.
 Skater cats: {', '.join(SKATER_CATS)} (PPG and PPA are separate). Goalie cats: {', '.join(GOALIE_CATS)}; no shutouts.
 Daily active lineup max {LINEUP_SLOTS}. Not every rostered player starts every day.
 Goalie categories count only with >= {GOALIE_MIN_GAMES} goalie games in the week.
@@ -241,7 +241,7 @@ async def get_matchup(week: int | None = None, team: str = "me") -> dict:
     pairing, side = find_team(period, tid)
     if not pairing:
         if any(b["team_id"] == tid for b in period["byes"]):
-            return {**base, "bye": True, "note": period["note"] or "Bye week (13-team league)."}
+            return {**base, "bye": True, "note": period["note"] or "Bye week."}
         return {**base, "note": period["note"] or "Team not in this period's schedule (playoffs?)."}
     other = "home" if side == "away" else "away"
     me, opp = pairing[side], pairing[other]
@@ -554,7 +554,7 @@ async def _goalie_gp_so_far(team_ids: list[str], start: date, end: date) -> dict
 
 @tool()
 async def get_league_rosters(timeframes: list[str] | None = None) -> dict:
-    """All 13 rosters in one call. Per player: fantrax_id, name, positions, nhl_team,
+    """Every team's roster in one call. Per player: fantrax_id, name, positions, nhl_team,
     roster_status (active/reserve/injured_reserve), injury_status, start_status (goalies),
     and per timeframe the RAW totals plus GP (no per-game division, no rounding).
     Skaters: GP G A PIM SOG PPG PPA Hit Blk Tk FOW TOI. Goalies: GP W SV GA SA MIN.

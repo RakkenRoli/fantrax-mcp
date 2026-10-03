@@ -44,3 +44,10 @@ def test_get_roster_by_code(srv):
 def test_unknown_team_is_a_readable_error(srv):
     out = asyncio.run(srv.get_roster("XYZ"))
     assert "error" in out and "AVR (Avas Raiders)" in out["error"]
+
+
+def test_me_without_team_configured_is_a_clear_error(srv, monkeypatch):
+    import dataclasses
+    monkeypatch.setattr(srv.FX, "s", dataclasses.replace(srv.FX.s, team_name="", team_id=None))
+    out = asyncio.run(srv.get_roster("me"))
+    assert "FANTRAX_TEAM_NAME" in out["error"]

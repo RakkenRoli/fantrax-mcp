@@ -182,6 +182,8 @@ class FantraxClient:
         if team.casefold() == "me":
             if self.s.team_id:
                 return self.s.team_id, teams.get(self.s.team_id, self.s.team_name)
+            if not self.s.team_name:
+                raise ValueError("Set FANTRAX_TEAM_NAME or FANTRAX_TEAM_ID to use team='me'.")
             team = self.s.team_name
         for tid, code in TEAM_CODES.items():
             if code == team.upper():

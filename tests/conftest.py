@@ -13,6 +13,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 DUMMY_SESSION = FIXTURES / "dummy_session.json"   # committed, read-only for tests
 
 os.environ["FANTRAX_LEAGUE_ID"] = "test"
+os.environ["FANTRAX_TEAM_NAME"] = "Gazdagréti Taxisok"   # the team in the committed fixtures
 os.environ["FANTRAX_COOKIE_FILE"] = str(DUMMY_SESSION)
 os.environ.pop("FANTRAX_TEAM_ID", None)
 os.environ.pop("MCP_AUTH_TOKEN", None)

@@ -60,7 +60,7 @@ class Settings:
     def load(cls) -> "Settings":
         return cls(
             league_id=_req("FANTRAX_LEAGUE_ID"),
-            team_name=os.environ.get("FANTRAX_TEAM_NAME", "Gazdagréti Taxisok"),
+            team_name=os.environ.get("FANTRAX_TEAM_NAME", "").strip().strip('"'),
             team_id=os.environ.get("FANTRAX_TEAM_ID") or None,
             cookie_file=os.environ.get("FANTRAX_COOKIE_FILE", "fantrax_cookies.json"),
             auth_token=os.environ.get("MCP_AUTH_TOKEN") or None,
