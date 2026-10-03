@@ -22,6 +22,9 @@ Caddy, and is consumed by Claude Desktop through `mcp-remote`.
 | `evaluate_add_drop(add, drop, week, ...)` | Net usable starts from a swap |
 | `goalie_check(week, team, start_share, ...)` | Projected goalie starts vs 3-game minimum, any team |
 | `get_league_standings()` | Standings in COMBINED order: division + division rank, W-L-T, pts, win%, div record, GB, category points for/against (include the in-progress week) |
+| `get_league_rosters(timeframes)` | All 13 rosters: status, injury, goalie start status, raw totals + GP per timeframe (PROJ_SEASON / YTD / LAST_SEASON) |
+| `lineup_plan(week, from_date)` | Per team per day: who fills which slot, plus unused players with a game |
+| `get_daily_player_stats(date)` | Every player who played on an ET date: owner (code or FA), slot that day, raw stats |
 | `session_health()` | Login validity, cookie expiry, category-map drift; `ok=false` = don't publish |
 | `fantrax_raw(method, data, period, ...)` | Allowlisted read-only passthrough; `period` slims `getStandings`, ids labeled |
 
@@ -111,6 +114,13 @@ Real `getStandings` fixtures for `test_league_standings.py` come from
 then commit the files to `tests/fixtures/`); until then those tests are skipped.
 
 ## Breaking changes for the website code
+
+- **0.3.0** — additive only: every player record gains `start_status` ("confirmed" |
+  "expected" | null, goalies) and `injury_status`; `league_lineup_capacity` rows gain
+  `goalie_gp_so_far` and `goalie_gp_needed` (null if the daily lookup failed, with
+  `goalie_gp_so_far_error` at the top level). New tools: `get_league_rosters`,
+  `lineup_plan`, `get_daily_player_stats`. Under `PROJ_SEASON`, `Tk` and `TOI` are null in
+  `get_league_rosters` (Fantrax does not project them); other tools are unchanged.
 
 - **0.2.1** — tools no longer raise on bad input: an unknown `team` or out-of-range `week`
   returns `{"error": "...", "fetched_at", "nhl_date"}`. Check for `error` before reading fields.

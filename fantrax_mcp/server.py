@@ -1,10 +1,11 @@
 """Fantrax + NHL schedule MCP server (read-only, streamable HTTP)."""
 from __future__ import annotations
 
+import asyncio
 import functools
 import hmac
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,10 +18,11 @@ from .config import (GOALIE_CATS, GOALIE_MIN_GAMES, LIGHT_NIGHT_MAX_GAMES, LINEU
                      parse_periods, week_ranges)
 from .categories import TEAM_CODES, check_against_live, label, label_keys, team_code
 from .fantrax_client import READ_METHODS, FantraxClient
-from .lineup import LineupPlayer, simulate_week, starts_by_position
+from .lineup import LineupPlayer, plan_week, simulate_week, starts_by_position
 from .nhl_client import NHLClient
 from .standings import find_team, slim_raw
 from .league_standings import build_standings
+from .league_data import blank_projection_gaps
 S = Settings.load()
 WEEKS = week_ranges(S.season_first_day, S.season_last_day, S.n_weeks)
 FX = FantraxClient(S)
@@ -36,7 +38,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.2.1")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.3.0")
 ET = ZoneInfo("America/New_York")
 
 
@@ -110,6 +112,7 @@ def _to_lineup(players: list[dict]) -> list[LineupPlayer]:
         LineupPlayer(
             name=p["name"], positions=set(p["positions"]), nhl_team=p["nhl_team"],
             available=p.get("roster_status") != "injured_reserve",
+            meta={"fantrax_id": p.get("fantrax_id")},
         )
         for p in players
     ]
@@ -455,11 +458,18 @@ async def league_lineup_capacity(week: int | None = None, from_date: str | None 
     """Compact lineup simulation for every team in one call: usable starts, games wasted on
     the bench, and goalie team-games (ceiling on goalie starts) vs the weekly minimum."""
     w, s, e = await _week(week)
+    week_start = s
     if from_date:
         s = max(s, date.fromisoformat(from_date))
     tbd = await _teams_by_day(s, e)
+    teams = await FX.teams()
+    try:
+        so_far = await _goalie_gp_so_far(list(teams), week_start, e)
+        so_far_err = None
+    except Exception as ex:  # noqa: BLE001 — optional enrichment
+        so_far, so_far_err = {}, f"{type(ex).__name__}: {ex}"
     rows = []
-    for tid, name in (await FX.teams()).items():
+    for tid, name in teams.items():
         try:
             ros = (await FX.roster(tid, None))["players"]
         except Exception as ex:  # noqa: BLE001 — one bad roster must not sink the table
@@ -469,14 +479,182 @@ async def league_lineup_capacity(week: int | None = None, from_date: str | None 
         sim = simulate_week(lineup, tbd, LINEUP_SLOTS)
         by_pos = starts_by_position(sim, lineup)
         g_games = sum(p["team_games"] for p in sim["players"] if "G" in p["positions"])
+        played = so_far.get(tid)
         rows.append({"code": team_code(tid), "name": name,
                      "starts": sim["total_starts"], "wasted": sim["total_wasted_games"],
                      "goalie_starts": by_pos.get("G", 0), "goalie_team_games": g_games,
-                     "goalie_min_met": by_pos.get("G", 0) >= GOALIE_MIN_GAMES})
+                     "goalie_min_met": by_pos.get("G", 0) >= GOALIE_MIN_GAMES,
+                     "goalie_gp_so_far": played,
+                     "goalie_gp_needed": None if played is None else max(0, GOALIE_MIN_GAMES - played)})
     rows.sort(key=lambda r: -r.get("starts", -1))
-    return {"week": w, "range": [s.isoformat(), e.isoformat()], "teams": rows,
-            "note": "goalie_starts is the lineup ceiling (team games that fit a G slot), "
-                    "not confirmed starts; tandems will start fewer."}
+    out = {"week": w, "range": [s.isoformat(), e.isoformat()], "teams": rows,
+           "note": "goalie_starts is the lineup ceiling (team games that fit a G slot), "
+                   "not confirmed starts; tandems will start fewer. goalie_gp_so_far counts "
+                   "goalie games already played in an active G slot since the week began "
+                   "(today included once the game has started)."}
+    if so_far_err:
+        out["goalie_gp_so_far_error"] = so_far_err
+    return out
+
+
+# ---------------------------------------------------------------- league-wide data
+ROSTER_TIMEFRAMES = ("PROJ_SEASON", "YTD", "LAST_SEASON")
+SKATER_OUT = ["GP", *SKATER_CATS]
+GOALIE_OUT = ["GP", "W", "SV", "GA", "SA", "MIN"]
+DAILY_GOALIE_OUT = ["W", "GA", "SA", "SV", "MIN"]
+
+
+async def _gather(coros, limit: int = 4) -> list:
+    """Run coroutines with bounded concurrency; exceptions are returned, not raised."""
+    sem = asyncio.Semaphore(limit)
+
+    async def run(c):
+        async with sem:
+            return await c
+    return await asyncio.gather(*(run(c) for c in coros), return_exceptions=True)
+
+
+def _et_today() -> date:
+    return datetime.now(ET).date()
+
+
+def _day_ttl(d: date) -> float:
+    """Recent dates still change (late games, stat corrections); older ones are settled."""
+    return 120 if d >= _et_today() - timedelta(days=1) else 6 * 3600
+
+
+def _parse_day(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"date must be YYYY-MM-DD (US-Eastern game date), got {value!r}") from None
+
+
+def _pick(stats: dict | None, keys: list[str]) -> dict | None:
+    return None if stats is None else {k: stats.get(k) for k in keys}
+
+
+async def _goalie_gp_so_far(team_ids: list[str], start: date, end: date) -> dict[str, int]:
+    """Goalie games played in an active G slot per team, from start to today (ET)."""
+    last = min(end, _et_today())
+    days = [start + timedelta(days=i) for i in range((last - start).days + 1)] if last >= start else []
+    out = {tid: 0 for tid in team_ids}
+    for d in days:
+        goalies = await FX.stats_rows("ALL", "POS_201", day=d, standard=True, ttl=_day_ttl(d))
+        played = {g["fantrax_id"] for g in goalies if (g["stats"].get("GP") or 0) > 0}
+        if not played:
+            continue
+        statuses = await _gather([FX.roster_on(tid, d, _day_ttl(d)) for tid in team_ids])
+        for tid, st in zip(team_ids, statuses):
+            if isinstance(st, Exception):
+                raise st
+            out[tid] += sum(1 for pid, slot in st.items() if slot == "active" and pid in played)
+    return out
+
+
+@tool()
+async def get_league_rosters(timeframes: list[str] | None = None) -> dict:
+    """All 13 rosters in one call. Per player: fantrax_id, name, positions, nhl_team,
+    roster_status (active/reserve/injured_reserve), injury_status, start_status (goalies),
+    and per timeframe the RAW totals plus GP (no per-game division, no rounding).
+    Skaters: GP G A PIM SOG PPG PPA Hit Blk Tk FOW TOI. Goalies: GP W SV GA SA MIN.
+    timeframes: any of PROJ_SEASON, YTD, LAST_SEASON (default all three). Fantrax does
+    not project Tk or TOI: they are null under PROJ_SEASON. A timeframe value is null when
+    Fantrax has no row for the player (e.g. no NHL games last season)."""
+    tfs = list(timeframes or ROSTER_TIMEFRAMES)
+    bad = [t for t in tfs if t not in ROSTER_TIMEFRAMES]
+    if bad:
+        raise ValueError(f"timeframes must be from {list(ROSTER_TIMEFRAMES)}; got {bad}. "
+                         "PROJ_GAME is not per game and is not offered here.")
+    teams = await FX.teams()
+    rosters = await _gather([FX.roster(tid, None) for tid in teams])
+    stats: dict[str, dict[str, dict]] = {}
+    for tf in tfs:
+        sk = await FX.stats_rows("ALL_TAKEN", "HOCKEY_SKATING", tf)
+        go = await FX.stats_rows("ALL_TAKEN", "POS_201", tf, standard=True)
+        stats[tf] = {r["fantrax_id"]: blank_projection_gaps(r["stats"], tf) for r in sk + go}
+    out = []
+    for (tid, name), ros in zip(teams.items(), rosters):
+        if isinstance(ros, Exception):
+            out.append({"team_id": tid, "code": team_code(tid), "name": name, "error": str(ros)})
+            continue
+        players = []
+        for p in ros["players"]:
+            keys = GOALIE_OUT if "G" in p["positions"] else SKATER_OUT
+            players.append({
+                "fantrax_id": p["fantrax_id"], "name": p["name"], "positions": p["positions"],
+                "nhl_team": p["nhl_team"], "roster_status": p.get("roster_status"),
+                "injury_status": p.get("injury_status"), "start_status": p.get("start_status"),
+                "stats": {tf: _pick(stats[tf].get(p["fantrax_id"]), keys) for tf in tfs},
+            })
+        out.append({"team_id": tid, "code": team_code(tid), "name": name, "players": players})
+    return {"timeframes": tfs, "teams": out}
+
+
+@tool()
+async def lineup_plan(week: int | None = None, from_date: str | None = None) -> dict:
+    """For every team, per day of the week: the slot assignment from the lineup matching
+    (date -> lineup [{slot, fantrax_id, name}]) plus `unused` players whose NHL team plays
+    that day but who get no slot. Same algorithm as lineup_capacity; uses current rosters
+    for every day, so future days assume no roster moves."""
+    w, s, e = await _week(week)
+    if from_date:
+        s = max(s, _parse_day(from_date))
+    tbd = await _teams_by_day(s, e)
+    teams = await FX.teams()
+    rosters = await _gather([FX.roster(tid, None) for tid in teams])
+    out = []
+    for (tid, name), ros in zip(teams.items(), rosters):
+        if isinstance(ros, Exception):
+            out.append({"team_id": tid, "code": team_code(tid), "name": name, "error": str(ros)})
+            continue
+        out.append({"team_id": tid, "code": team_code(tid), "name": name,
+                    "days": plan_week(_to_lineup(ros["players"]), tbd, LINEUP_SLOTS)})
+    return {"week": w, "range": [s.isoformat(), e.isoformat()], "slots": LINEUP_SLOTS,
+            "teams": out}
+
+
+@tool()
+async def get_daily_player_stats(date: str) -> dict:  # noqa: A002 — public arg name
+    """Every NHL player who played on `date` (YYYY-MM-DD, US-Eastern game date), rostered or
+    free agent, one row each: fantrax_id, name, positions, nhl_team, owner (team code or
+    "FA"), slot_status that day for rostered players (active / bench / ir), and raw stats.
+    Skaters: G A PIM SOG PPG PPA Hit Blk Tk FOW TOI (TOI decimal minutes).
+    Goalies: W GA SA SV MIN (raw components, no rates)."""
+    d = _parse_day(date)
+    ttl = _day_ttl(d)
+    sk = await FX.stats_rows("ALL", "HOCKEY_SKATING", day=d, ttl=ttl,
+                             stop_after_idle_pages=2, played_key="GP")
+    go = await FX.stats_rows("ALL", "POS_201", day=d, standard=True, ttl=ttl,
+                             stop_after_idle_pages=2, played_key="GP")
+    played = [r for r in sk + go if (r["stats"].get("GP") or 0) > 0]
+    owners = sorted({r["owner_team_id"] for r in played if r["owner_team_id"]})
+    statuses = await _gather([FX.roster_on(tid, d, ttl) for tid in owners])
+    slot_of: dict[str, dict[str, str]] = {}
+    errors = {}
+    for tid, st in zip(owners, statuses):
+        if isinstance(st, Exception):
+            errors[team_code(tid)] = f"{type(st).__name__}: {st}"
+        else:
+            slot_of[tid] = st
+    rows = []
+    for r in played:
+        tid = r["owner_team_id"]
+        goalie = "G" in r["positions"]
+        rows.append({
+            "fantrax_id": r["fantrax_id"], "name": r["name"], "positions": r["positions"],
+            "nhl_team": r["nhl_team"], "owner": team_code(tid) if tid else "FA",
+            "slot_status": slot_of.get(tid, {}).get(r["fantrax_id"]) if tid else None,
+            "stats": _pick(r["stats"], DAILY_GOALIE_OUT if goalie else SKATER_CATS),
+        })
+    rows.sort(key=lambda x: (x["owner"] == "FA", x["owner"], x["name"] or ""))
+    out = {"date": d.isoformat(), "players": rows,
+           "counts": {"skaters": sum(1 for x in rows if "G" not in x["positions"]),
+                      "goalies": sum(1 for x in rows if "G" in x["positions"]),
+                      "rostered": sum(1 for x in rows if x["owner"] != "FA")}}
+    if errors:
+        out["slot_status_errors"] = errors
+    return out
 
 
 async def _health() -> dict:

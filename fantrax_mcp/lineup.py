@@ -91,3 +91,26 @@ def starts_by_position(sim: dict, roster: list[LineupPlayer]) -> Counter:
     for pl in sim["players"]:
         c[pos_of[pl["name"]]] += pl["usable_starts"]
     return c
+
+
+def plan_week(
+    roster: list[LineupPlayer],
+    teams_by_day: dict[date, set[str]],
+    slots: dict[str, int],
+) -> dict[str, dict]:
+    """Who plays where, per day: the same matching as simulate_week, but returning the
+    assignment. {date: {"lineup": [{slot, fantrax_id, name}], "unused": [{fantrax_id, name}]}}.
+    `unused` = available players whose NHL team plays that day but who got no slot."""
+    out: dict[str, dict] = {}
+    order = {s: i for i, s in enumerate(slots)}
+    for d, teams in teams_by_day.items():
+        playing = [p for p in roster if p.available and p.nhl_team in teams]
+        assigned = assign_day(playing, slots)
+        lineup = sorted(
+            ({"slot": pos, "fantrax_id": playing[i].meta.get("fantrax_id"), "name": playing[i].name}
+             for i, pos in assigned.items()),
+            key=lambda r: (order[r["slot"]], r["name"]))
+        unused = [{"fantrax_id": playing[i].meta.get("fantrax_id"), "name": playing[i].name}
+                  for i in range(len(playing)) if i not in assigned]
+        out[d.isoformat()] = {"lineup": lineup, "unused": unused}
+    return out

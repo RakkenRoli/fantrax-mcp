@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,9 @@ import httpx
 from .cache import TTLCache
 from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP, TEAM_CODES
 from .config import Settings, nhl_abbrev
+from .league_data import (GOALIE_RAW, SKATER_RAW, injury_status, owner_team_id,
+                          parse_day_periods, roster_day_status, row_stats, scip_index,
+                          start_status)
 from .standings import parse_schedule
 
 FXPA_URL = "https://www.fantrax.com/fxpa/req"
@@ -100,6 +104,8 @@ def _scorer_info(scorer: dict) -> dict:
         "nhl_team": nhl_abbrev(scorer.get("teamShortName")),
         "positions": [p.strip() for p in pos.replace("/", ",").split(",") if p.strip()],
         "notes": notes,
+        "start_status": start_status(notes) if pos.strip() == "G" else None,
+        "injury_status": injury_status(notes),
     }
 
 
@@ -215,6 +221,10 @@ class FantraxClient:
             out["YTD"] = (reg_ytd[0]["code"], "YEAR_TO_DATE")
         if len(reg_ytd) > 1:
             out["LAST_SEASON"] = (reg_ytd[1]["code"], "YEAR_TO_DATE")
+        by_date = [o for o in opts if o.get("code", "").startswith("SEASON_")
+                   and o.get("timeframeTypeCode") == "BY_DATE" and "Reg Season" in o.get("name", "")]
+        if by_date:
+            out["BY_DATE"] = (by_date[0]["code"], "BY_DATE")
         return out
 
     async def category_codes(self) -> dict[str, str]:
@@ -285,6 +295,76 @@ class FantraxClient:
             out.append({"name": scorer.get("name"), "fantrax_id": scorer.get("scorerId"),
                         "nhl_team": nhl_abbrev(scorer.get("teamShortName")), "stats": stats})
         return out
+
+    # ---------- league-wide raw stats ----------
+    async def stats_rows(self, status_filter: str, group: str, timeframe: str | None = None,
+                         day: date | None = None, standard: bool = False, ttl: float = 900,
+                         per_page: int = 500, max_pages: int = 30,
+                         stop_after_idle_pages: int | None = None,
+                         played_key: str | None = None) -> list[dict]:
+        """Every getPlayerStats row for a filter, flattened to identity + owner + raw stats
+        (keyed by our names, mapped by scipId). Either `timeframe` (YTD, LAST_SEASON,
+        PROJ_SEASON...) or `day` (single NHL date, BY_DATE). standard=True switches to the
+        "Standard" category view, which is the only one with goalie GA/SA/MIN.
+        stop_after_idle_pages: stop paging after that many consecutive pages in which no row
+        has played_key > 0 (used for single-date pulls of the ~7,600-player pool)."""
+        codes = await self.season_codes()
+        key = "BY_DATE" if day else timeframe
+        if key not in codes:
+            raise ValueError(f"timeframe must be one of {sorted(k for k in codes if k != 'BY_DATE')}")
+        code, tf = codes[key]
+        kw: dict[str, Any] = {"statusOrTeamFilter": status_filter, "positionOrGroup": group,
+                              "seasonOrProjection": code, "timeframeTypeCode": tf,
+                              "maxResultsPerPage": str(per_page)}
+        if day:
+            kw["startDate"] = kw["endDate"] = day.isoformat()
+        if standard:
+            kw["scoringCategoryType"] = "1"
+        wanted = GOALIE_RAW if group == "POS_201" else SKATER_RAW
+        out: list[dict] = []
+        idle = 0
+        for page in range(1, max_pages + 1):
+            data = await self.cached(ttl, "getPlayerStats", **kw, pageNumber=str(page))
+            idx = scip_index(data.get("tableHeader") or {}, wanted)
+            rows = []
+            for row in data.get("statsTable") or []:
+                scorer = row.get("scorer")
+                if not scorer:
+                    continue
+                rec = _scorer_info(scorer)
+                rec["owner_team_id"] = owner_team_id(row)
+                rec["stats"] = row_stats(row, idx)
+                rows.append(rec)
+            out += rows
+            if stop_after_idle_pages and played_key:
+                idle = 0 if any((r["stats"].get(played_key) or 0) > 0 for r in rows) else idle + 1
+                if idle >= stop_after_idle_pages:
+                    break
+            pages = (data.get("paginatedResultSet") or {}).get("totalNumPages") or 1
+            if page >= pages or not rows:
+                break
+        return out
+
+    # ---------- daily lineups ----------
+    async def day_periods(self) -> dict[date, int]:
+        """{date: Fantrax daily period index}; roster pages are addressed by this index."""
+        data = await self.cached(12 * 3600, "getTeamRosterInfo", teamId=await self._any_team_id())
+        lst = (data.get("displayedLists") or {}).get("periodList") or []
+        return parse_day_periods(lst, self.s.season_first_day.year)
+
+    async def _any_team_id(self) -> str:
+        if self.s.team_id:
+            return self.s.team_id
+        return (await self.resolve_team("me"))[0]
+
+    async def roster_on(self, team_id: str, day: date, ttl: float = 300) -> dict[str, str]:
+        """{fantrax_id: active|bench|ir} for one fantasy team on one date."""
+        periods = await self.day_periods()
+        if day not in periods:
+            raise ValueError(f"{day} is outside the Fantrax season calendar")
+        idx = periods[day]
+        data = await self.cached(ttl, "getTeamRosterInfo", teamId=team_id, period=str(idx))
+        return roster_day_status(data, idx)
 
     # ---------- session ----------
     # Cookies that rotate on their own and say nothing about the Fantrax login.
