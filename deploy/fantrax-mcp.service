@@ -1,0 +1,20 @@
+[Unit]
+Description=Fantrax MCP server (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fantrax
+WorkingDirectory=/opt/fantrax-mcp
+EnvironmentFile=/etc/fantrax-mcp/env
+ExecStart=/opt/fantrax-mcp/.venv/bin/fantrax-mcp
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/fantrax-mcp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

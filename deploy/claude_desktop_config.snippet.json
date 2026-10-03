@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "fantrax": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "https://fantrax.example.lan/mcp",
+        "--header", "Authorization:${FANTRAX_MCP_AUTH}"
+      ],
+      "env": {
+        "FANTRAX_MCP_AUTH": "Bearer change-me-long-random-string",
+        "NODE_EXTRA_CA_CERTS": "/home/mate/.local/share/caddy-root.crt"
+      }
+    }
+  }
+}

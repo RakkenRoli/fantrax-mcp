@@ -1,0 +1,8 @@
+# Add to the existing Caddy LXC config. Replace 10.0.0.X with the MCP LXC's IP.
+fantrax.example.lan {
+	tls internal
+	reverse_proxy 10.0.0.X:8765 {
+		# Streamable HTTP uses long-lived SSE responses; don't buffer them
+		flush_interval -1
+	}
+}
