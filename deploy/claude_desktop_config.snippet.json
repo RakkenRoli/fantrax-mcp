@@ -9,7 +9,7 @@
       ],
       "env": {
         "FANTRAX_MCP_AUTH": "Bearer change-me-long-random-string",
-        "NODE_EXTRA_CA_CERTS": "/home/mate/.local/share/caddy-root.crt"
+        "NODE_EXTRA_CA_CERTS": "/path/to/caddy-root.crt"
       }
     }
   }
