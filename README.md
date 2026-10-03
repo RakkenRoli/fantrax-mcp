@@ -260,3 +260,9 @@ Changes to tool output are recorded in [CHANGELOG.md](CHANGELOG.md).
 | `session_health` reports a category mismatch | Your league scores different categories; see [Is it a fit for my league?](#is-it-a-fit-for-my-league) |
 | Claude Desktop keeps an old connection | `rm -rf ~/.mcp-auth`, then restart Claude Desktop |
 | Service won't start | `journalctl -u fantrax-mcp -n 50`; a missing `FANTRAX_LEAGUE_ID` is the usual cause |
+
+---
+
+## License
+
+MIT, see [LICENSE](LICENSE). Not affiliated with or endorsed by Fantrax or the NHL.
