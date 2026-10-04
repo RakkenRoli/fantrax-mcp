@@ -1,0 +1,981 @@
+{
+ "_source": "getStandings view=COMBINED period=1, 2026-10-04 (logos/periods trimmed)",
+ "fantasyTeamInfo": {
+  "r27c7dt2mtr5w0js": {
+   "name": "Kistarcsa Wildcocks",
+   "shortName": "KWC"
+  },
+  "02ud8yktmtr5w0js": {
+   "name": "Hamilton Outlaws",
+   "shortName": "HOL"
+  },
+  "le98eijtmtr5w0js": {
+   "name": "Avas Raiders",
+   "shortName": "AVR"
+  },
+  "6ayw03ncmtr5w0js": {
+   "name": "Gazdagréti Taxisok",
+   "shortName": "GTX"
+  },
+  "mc5s8r57mtr5w0js": {
+   "name": "Utah Vultures",
+   "shortName": "UV"
+  },
+  "pcn509g7mtr5w0js": {
+   "name": "Dropping the Gloves",
+   "shortName": "DTG"
+  },
+  "20lpzud7mtsa2wxf": {
+   "name": "Acélvárosi Pingvinek",
+   "shortName": "NT 13"
+  },
+  "wge2dwlrmtr5w0js": {
+   "name": "Onga Capitals",
+   "shortName": "OC"
+  },
+  "2qhvckkvmtr5w0jr": {
+   "name": "True North",
+   "shortName": "WPG"
+  },
+  "089wx6w1mtr5w0js": {
+   "name": "BVB Eishockeyverein",
+   "shortName": "BVB"
+  },
+  "hzvy7u89mtr5w0js": {
+   "name": "RS Devils",
+   "shortName": "NT 9"
+  },
+  "y5y8jp62mtr5w0js": {
+   "name": "Kilian Judges",
+   "shortName": "KJD"
+  },
+  "85j9ouszmts9qdsy": {
+   "name": "Görömböly Blackhawks",
+   "shortName": "GBH"
+  }
+ },
+ "displayedSelections": {
+  "period": 1,
+  "view": "COMBINED",
+  "timeframeType": "YEAR_TO_DATE"
+ },
+ "displayedLists": {
+  "tabs": [
+   {
+    "name": "East Side",
+    "id": "_7o42rumxmtr5w0h4"
+   },
+   {
+    "name": "West Side",
+    "id": "_erfq1kc5mtr5w0h4"
+   },
+   {
+    "name": "All",
+    "id": "ALL"
+   },
+   {
+    "name": "Combined",
+    "id": "COMBINED"
+   },
+   {
+    "name": "Results",
+    "id": "SCHEDULE"
+   },
+   {
+    "name": "Season Stats",
+    "id": "SEASON_STATS"
+   },
+   {
+    "name": "Playoffs",
+    "id": "PLAYOFFS"
+   }
+  ]
+ },
+ "tableList": [
+  {
+   "fixedRows": true,
+   "tableType": "H2hRotisserie1",
+   "caption": "Standings",
+   "subCaption": "COMBINED",
+   "fixedHeader": {
+    "cells": [
+     {
+      "name": "Rank",
+      "shortName": "Rank",
+      "key": "rank"
+     },
+     {
+      "name": "Team",
+      "shortName": "Team",
+      "key": "team"
+     }
+    ]
+   },
+   "header": {
+    "cells": [
+     {
+      "sortDirection": 1,
+      "name": "Wins",
+      "shortName": "W",
+      "key": "win"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Losses",
+      "shortName": "L",
+      "key": "loss"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Ties",
+      "shortName": "T",
+      "key": "tie"
+     },
+     {
+      "sortDirection": 1,
+      "name": "2 points for win, 1 point for a tie",
+      "shortName": "Points",
+      "key": "pts"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Win Percentage",
+      "shortName": "Win%",
+      "key": "winpc"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Division Record (W-L-T)",
+      "shortName": "Div",
+      "key": "div"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Games Back",
+      "shortName": "GB",
+      "key": "gb"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Waiver Wire Claim Order",
+      "shortName": "WW",
+      "key": "wwOrder"
+     },
+     {
+      "sortDirection": 1,
+      "name": "FA Claims Remaining (Season)",
+      "shortName": "CR-FA",
+      "key": "maxClaimsFree"
+     },
+     {
+      "sortDirection": 1,
+      "name": "WW Claims Remaining (Season)",
+      "shortName": "CR-WW",
+      "key": "maxClaimsWaiver"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Claims Remaining (Season)",
+      "shortName": "CR",
+      "key": "maxClaimsSeason"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Total season Category Points for",
+      "shortName": "PtsF",
+      "key": "cpf"
+     },
+     {
+      "sortDirection": 1,
+      "name": "Total season Category Points against",
+      "shortName": "PtsA",
+      "key": "cpa"
+     }
+    ]
+   },
+   "rows": [
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "9"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "1"
+      },
+      {
+       "content": "Acélvárosi Pingvinek",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "20lpzud7mtsa2wxf"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "8"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "8.5",
+       "toolTip": "8.5"
+      },
+      {
+       "content": "6.5",
+       "toolTip": "6.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "2"
+      },
+      {
+       "content": "Avas Raiders",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "le98eijtmtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "11"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "5.5",
+       "toolTip": "5.5"
+      },
+      {
+       "content": "9.5",
+       "toolTip": "9.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "3"
+      },
+      {
+       "content": "BVB Eishockeyverein",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "089wx6w1mtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "7"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "7",
+       "toolTip": "7"
+      },
+      {
+       "content": "8",
+       "toolTip": "8"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "4"
+      },
+      {
+       "content": "Dropping the Gloves",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "pcn509g7mtr5w0js"
+      }
+     ]
+    },
+    {
+     "highlight": true,
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "6"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "6",
+       "toolTip": "6"
+      },
+      {
+       "content": "9",
+       "toolTip": "9"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "5"
+      },
+      {
+       "content": "Gazdagréti Taxisok",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "6ayw03ncmtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "13"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "6.5",
+       "toolTip": "6.5"
+      },
+      {
+       "content": "8.5",
+       "toolTip": "8.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "6"
+      },
+      {
+       "content": "Görömböly Blackhawks",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "85j9ouszmts9qdsy"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "12"
+      },
+      {
+       "content": "65"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "65"
+      },
+      {
+       "content": "8.5",
+       "toolTip": "8.5"
+      },
+      {
+       "content": "6.5",
+       "toolTip": "6.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "7"
+      },
+      {
+       "content": "Hamilton Outlaws",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "02ud8yktmtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "1"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "6.5",
+       "toolTip": "6.5"
+      },
+      {
+       "content": "8.5",
+       "toolTip": "8.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "8"
+      },
+      {
+       "content": "Kilian Judges",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "y5y8jp62mtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "4"
+      },
+      {
+       "content": "68"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "68"
+      },
+      {
+       "content": "8.5",
+       "toolTip": "8.5"
+      },
+      {
+       "content": "6.5",
+       "toolTip": "6.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "9"
+      },
+      {
+       "content": "Kistarcsa Wildcocks",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "r27c7dt2mtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "10"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "9",
+       "toolTip": "9"
+      },
+      {
+       "content": "6",
+       "toolTip": "6"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "10"
+      },
+      {
+       "content": "Onga Capitals",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "wge2dwlrmtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "2"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "69"
+      },
+      {
+       "content": "8",
+       "toolTip": "8"
+      },
+      {
+       "content": "7",
+       "toolTip": "7"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "11"
+      },
+      {
+       "content": "RS Devils",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "hzvy7u89mtr5w0js"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "5"
+      },
+      {
+       "content": "68"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "68"
+      },
+      {
+       "content": "9.5",
+       "toolTip": "9.5"
+      },
+      {
+       "content": "5.5",
+       "toolTip": "5.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "12"
+      },
+      {
+       "content": "True North",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "2qhvckkvmtr5w0jr"
+      }
+     ]
+    },
+    {
+     "cells": [
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "0"
+      },
+      {
+       "content": "-"
+      },
+      {
+       "content": "0-0-0"
+      },
+      {
+       "content": "0",
+       "toolTip": "0"
+      },
+      {
+       "content": "3"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "70"
+      },
+      {
+       "content": "67"
+      },
+      {
+       "content": "6.5",
+       "toolTip": "6.5"
+      },
+      {
+       "content": "8.5",
+       "toolTip": "8.5"
+      }
+     ],
+     "fixedCells": [
+      {
+       "content": "13"
+      },
+      {
+       "content": "Utah Vultures",
+       "leagueId": "8sctyshwmtr5w0a0",
+       "id": "8sctyshwmtr5w0a0",
+       "teamId": "mc5s8r57mtr5w0js"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

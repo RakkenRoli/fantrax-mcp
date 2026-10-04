@@ -111,3 +111,20 @@ def test_real_fixture_13_rows_two_divisions_all_coded():
     assert all(r["team_id"] in TEAM_CODES and r["code"] == TEAM_CODES[r["team_id"]] for r in rows)
     assert all(isinstance(r["div_wlt"], list) and len(r["div_wlt"]) == 3 for r in rows)
     assert all(r["win_pct"] is None or isinstance(r["win_pct"], (int, float)) for r in rows)
+
+
+@real
+def test_real_fixture_values_2026_10_04():
+    """Week 1 still running: no matchup final, category points already live."""
+    out = asyncio.run(build_standings(_replay(), code_for=team_code))
+    by = {r["code"]: r for r in out["rows"]}
+    assert out["rule"] == "2 points for win, 1 point for a tie"
+    assert [r["code"] for r in out["rows"]][:3] == ["ACP", "AVR", "BVB"]   # alphabetical at 0-0-0
+    # Fantrax shortNames are stale for three teams; TEAM_CODES wins.
+    assert by["ACP"]["team_id"] == "20lpzud7mtsa2wxf" and by["TN"]["code"] == "TN" and by["RSD"]["code"] == "RSD"
+    assert (by["GTX"]["division"], by["GTX"]["division_rank"]) == ("West Side", 4)
+    assert (by["DTG"]["division"], by["DTG"]["division_rank"]) == ("East Side", 1)
+    assert (by["GTX"]["cat_pts_for"], by["GTX"]["cat_pts_against"]) == (6, 9)
+    assert (by["TN"]["cat_pts_for"], by["TN"]["cat_pts_against"]) == (9.5, 5.5)
+    assert by["ACP"]["cat_pts_for"] == 0 and by["ACP"]["cat_pts_against"] == 0
+    assert all(r["win_pct"] is None and r["div_wlt"] == [0, 0, 0] and r["pts"] == 0 for r in out["rows"])
