@@ -28,7 +28,7 @@ in charge in Fantrax; the server just gives Claude accurate numbers to reason wi
 | `get_league_matchups(week)` | Every pairing for a week, plus bye teams |
 | `get_league_schedule` | All periods: pairings, byes, playoff rounds |
 | `get_roster(team)` | A roster with positions, NHL team, status, injury notes and stats |
-| `get_league_rosters(timeframes, include_free_agents)` | Every roster in one call, with raw season totals per timeframe; optionally free agents (code `FA`) as a baseline |
+| `get_league_rosters(timeframes, include_free_agents, fa_require_ytd_gp)` | Every roster in one call, with raw season totals per timeframe; optionally free agents (code `FA`) as a baseline |
 | `get_free_agents(position, ...)` | Available players, sortable by any category |
 | `get_goalie_stats(team)` | Goalie W / GAA / SV / SV% plus goals against, shots against and minutes |
 | `get_daily_player_stats(date)` | Everyone who played on a date: owner, lineup slot that day, raw stats |
@@ -197,6 +197,7 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
 | `FANTRAX_MIN_INTERVAL` | | `0.75` | Seconds between requests to Fantrax. Fantrax rejects bursts with `INVALID_REQUEST` |
 | `FANTRAX_RETRY_BACKOFF` | | `2,5,15` | Waits (s) before each retry of a rejected or 429/5xx request |
 | `FANTRAX_STATE_DIR` | | (memory only) | Where last good copies of big pulls are kept across restarts; the shipped unit sets `/var/lib/fantrax-mcp` |
+| `MCP_RESULT_FORMAT` | | `text` | How results are sent: `text` = one compact JSON text block; `structured` = only `structuredContent`; `both` = the MCP SDK default (structured plus an indented copy, over twice the size) |
 | `FANTRAX_COOKIE_WRITEBACK` | | off | `1` = save cookies Fantrax refreshes back to the cookie file (see below) |
 | `GOALIE_MIN_PENALTY` | | | What your league does when a team misses the goalie minimum, copied from the Rules page (e.g. `"GAA and SV% count as losses"`). Returned by `league_info` |
 

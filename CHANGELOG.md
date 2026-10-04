@@ -2,6 +2,26 @@
 
 Changes to tool output that client code should know about. Newest first.
 
+## 0.4.2
+
+Breaking changes for the website code:
+
+- **Wire format.** Every tool now returns ONE compact JSON text block (`content[0].text`)
+  and no `structuredContent`. Before, the SDK sent both: `structuredContent` plus an
+  indented JSON copy in `content`. Read `content[0].text` and `JSON.parse` it. To get the
+  old behaviour back set `MCP_RESULT_FORMAT=both`; `structured` sends only
+  `structuredContent`. `{"error": ...}` results are still normal results (`isError` false).
+- **Free-agent records are slim:** `fantrax_id`, `name`, `positions`, `nhl_team`, `stats`.
+  `roster_status`, `injury_status` and `start_status` are no longer sent for code `"FA"`
+  (rostered players unchanged).
+
+Additive:
+
+- `get_league_rosters(..., fa_require_ytd_gp=True)` keeps only free agents with >= 1 GP
+  in YTD (default stays YTD or LAST_SEASON).
+
+Size: a full `include_free_agents=True` response is roughly a quarter of 0.4.1's.
+
 ## 0.4.1
 
 Breaking changes for the website code: none; additive.

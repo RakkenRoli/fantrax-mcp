@@ -190,7 +190,8 @@ def test_free_agents_entry_filtered_by_gp(srv, monkeypatch):
     ids = [p["fantrax_id"] for p in fa["players"]]
     assert ids == ["fa_played", "fag"]                     # fa_never has 0 GP in YTD and LAST_SEASON
     p = fa["players"][0]
-    assert p["roster_status"] is None and set(p["stats"]) == {"PROJ_SEASON"}
+    assert set(p) == {"fantrax_id", "name", "positions", "nhl_team", "stats"}   # slim FA record
+    assert set(p["stats"]) == {"PROJ_SEASON"}
     assert p["stats"]["PROJ_SEASON"]["GP"] == 70 and p["stats"]["PROJ_SEASON"]["TOI"] is None
     assert fa["players"][1]["stats"]["PROJ_SEASON"]["SA"] == 330
     # YTD + LAST_SEASON were pulled for the filter although only PROJ_SEASON was asked for
@@ -266,3 +267,39 @@ def test_unrecoverable_fantrax_error_is_a_readable_tool_result(srv, monkeypatch)
     out = asyncio.run(srv.get_league_rosters(["YTD"]))
     assert "INVALID_REQUEST" in out["error"]
     assert out["request"] == {"method": "getStandings", "data": {"view": "COMBINED"}}
+
+
+def test_fa_require_ytd_gp_drops_last_season_only_players(srv, monkeypatch):
+    _fake_fantrax(srv, monkeypatch)
+    real = srv.FX.call
+
+    async def call(method, **data):
+        if data["statusOrTeamFilter"] != "ALL_AVAILABLE":
+            return await real(method, **data)
+        tf = next(k for k, v in EXPECTED.items() if v[0] == data["seasonOrProjection"])
+        if data["positionOrGroup"] == "POS_201":
+            return {"tableHeader": G_HEADER, "statsTable": []}
+        rows = []
+        for pid, gp in (("ytd_player", {"YTD": "1", "LAST_SEASON": "0", "PROJ_SEASON": "70"}),
+                        ("last_only", {"YTD": "0", "LAST_SEASON": "60", "PROJ_SEASON": "50"})):
+            vals = [gp[tf], "1", "1", "0", "5", "0", "0", "3", "2", "1", "0", "30:00"]
+            rows.append({"scorer": {"scorerId": pid, "name": pid, "teamShortName": "BOS", "posShortNames": "D"},
+                         "cells": [{"content": "FA"}] + [{"content": v} for v in vals]})
+        return {"tableHeader": SK_HEADER, "statsTable": rows}
+
+    monkeypatch.setattr(srv.FX, "call", call)
+    both = asyncio.run(srv.get_league_rosters(["YTD"], include_free_agents=True))
+    srv.FX._cache = type(srv.FX._cache)()
+    ytd = asyncio.run(srv.get_league_rosters(["YTD"], include_free_agents=True, fa_require_ytd_gp=True))
+    ids = lambda out: [p["fantrax_id"] for p in next(t for t in out["teams"] if t["code"] == "FA")["players"]]
+    assert ids(both) == ["last_only", "ytd_player"] and ids(ytd) == ["ytd_player"]
+
+
+def test_wire_format_is_one_compact_text_block():
+    from fantrax_mcp import server
+    out = {"teams": [{"code": "FA", "players": [{"name": "Žemlička", "stats": {"YTD": None}}]}]}
+    r = server._encode(out)
+    assert r.structured_content is None and len(r.content) == 1
+    text = r.content[0].text
+    assert json.loads(text) == out and ": " not in text and "\n" not in text   # compact
+    assert "Žemlička" in text                                               # no \u escapes

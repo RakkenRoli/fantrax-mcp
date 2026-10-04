@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import uvicorn
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult, TextContent
 from mcp.server.transport_security import TransportSecuritySettings
 
 from .config import (GOALIE_CATS, GOALIE_MIN_GAMES, LIGHT_NIGHT_MAX_GAMES, LINEUP_SLOTS,
@@ -39,7 +40,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.4.1")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.4.2")
 ET = ZoneInfo("America/New_York")
 
 
@@ -72,10 +73,35 @@ def stamped(fn):
     return wrapper
 
 
+# How results go on the wire. "text" (default): ONE compact JSON text block. "structured":
+# only structuredContent. "both": the SDK default (structured + an indented JSON copy),
+# which more than doubles the size of large results.
+RESULT_FORMAT = os.environ.get("MCP_RESULT_FORMAT", "text").strip().lower()
+
+
+def _encode(out: Any) -> CallToolResult:
+    # {"error": ...} stays a normal result (isError false), as documented since 0.2.1.
+    if RESULT_FORMAT == "structured" and isinstance(out, dict):
+        return CallToolResult(content=[], structured_content=out)
+    text = json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str)
+    return CallToolResult(content=[TextContent(type="text", text=text)])
+
+
 def tool():
-    """@mcp.tool() with a fetch timestamp on the result."""
+    """Register an MCP tool: fetch timestamp on the result, readable errors, compact output.
+    The module-level name stays the plain dict-returning function (used by tests)."""
     def deco(fn):
-        return mcp.tool()(stamped(fn))
+        plain = stamped(fn)
+        if RESULT_FORMAT == "both":
+            mcp.tool()(plain)
+            return plain
+
+        @functools.wraps(plain)
+        async def wire(*args, **kwargs):
+            return _encode(await plain(*args, **kwargs))
+        wire.__annotations__ = {**plain.__annotations__, "return": CallToolResult}
+        mcp.tool(structured_output=False)(wire)
+        return plain
     return deco
 
 
@@ -620,9 +646,18 @@ def _player_out(p: dict, stats: dict[str, dict[str, dict]], tfs: list[str]) -> d
             "stats": {tf: _pick(stats.get(tf, {}).get(p["fantrax_id"]), keys) for tf in tfs}}
 
 
+def _fa_out(p: dict, stats: dict[str, dict[str, dict]], tfs: list[str]) -> dict:
+    """Slim free-agent record: the site uses FAs only as a stats baseline."""
+    keys = GOALIE_OUT if "G" in p["positions"] else SKATER_OUT
+    return {"fantrax_id": p["fantrax_id"], "name": p["name"], "positions": p["positions"],
+            "nhl_team": p["nhl_team"],
+            "stats": {tf: _pick(stats.get(tf, {}).get(p["fantrax_id"]), keys) for tf in tfs}}
+
+
 @tool()
 async def get_league_rosters(timeframes: list[str] | None = None,
-                             include_free_agents: bool = False) -> dict:
+                             include_free_agents: bool = False,
+                             fa_require_ytd_gp: bool = False) -> dict:
     """Every team's roster in one call. Per player: fantrax_id, name, positions, nhl_team,
     roster_status (active/reserve/injured_reserve), injury_status, start_status (goalies),
     and per timeframe the RAW totals plus GP (no per-game division, no rounding).
@@ -630,8 +665,10 @@ async def get_league_rosters(timeframes: list[str] | None = None,
     timeframes: any of PROJ_SEASON, YTD, LAST_SEASON (default all three). Fantrax does
     not project Tk or TOI: they are null under PROJ_SEASON. A timeframe value is null when
     Fantrax has no row for the player (e.g. no NHL games last season).
-    include_free_agents: also return unrostered players as an extra team with code "FA"
-    (same fields and timeframes), limited to players with >= 1 GP in YTD or LAST_SEASON.
+    include_free_agents: also return unrostered players as an extra team with code "FA",
+    limited to players with >= 1 GP in YTD or LAST_SEASON. Free agents carry only
+    fantrax_id, name, positions, nhl_team and stats (no status/injury/start fields).
+    fa_require_ytd_gp: keep only free agents with >= 1 GP in YTD (much smaller early season).
     The first call pulls the whole player pool and can take a minute; later calls are cached.
     If a request fails, the rest is still returned: see `errors` and `incomplete`."""
     tfs = list(timeframes or ROSTER_TIMEFRAMES)
@@ -658,9 +695,10 @@ async def get_league_rosters(timeframes: list[str] | None = None,
         # YTD and LAST_SEASON decide who is kept, even when not requested for output.
         pull = list(dict.fromkeys(tfs + ["YTD", "LAST_SEASON"]))
         fa_stats, fa_ident = await _timeframe_stats("ALL_AVAILABLE", pull, errors, "free_agents", stale)
-        played = {pid for tf in ("YTD", "LAST_SEASON")
+        gate_tfs = ("YTD",) if fa_require_ytd_gp else ("YTD", "LAST_SEASON")
+        played = {pid for tf in gate_tfs
                   for pid, st in fa_stats.get(tf, {}).items() if (st.get("GP") or 0) >= 1}
-        fa_players = [_player_out({**fa_ident[pid], "roster_status": None}, fa_stats, tfs)
+        fa_players = [_fa_out(fa_ident[pid], fa_stats, tfs)
                       for pid in sorted(played, key=lambda i: fa_ident[i]["name"] or "")]
         out.append({"team_id": None, "code": "FA", "name": "Free agents", "players": fa_players})
 
