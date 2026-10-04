@@ -130,3 +130,56 @@ def test_invalid_request_is_retried_once_then_reported_with_the_request(srv, mon
     assert ei.value.code == "INVALID_REQUEST" and len(posts) == 4
     assert '"statusOrTeamFilter": "ALL_TAKEN"' in str(ei.value)
     assert "cookie" not in str(ei.value).lower()
+
+
+def test_free_agents_entry_filtered_by_gp(srv, monkeypatch):
+    sent = []
+
+    async def call(method, **data):
+        sent.append(data)
+        tf = next(k for k, v in EXPECTED.items() if v[0] == data["seasonOrProjection"])
+        if data["statusOrTeamFilter"] == "ALL_TAKEN":
+            return {"tableHeader": SK_HEADER if data["positionOrGroup"] != "POS_201" else G_HEADER,
+                    "statsTable": []}
+        if data["positionOrGroup"] == "POS_201":
+            gp = {"PROJ_SEASON": "40", "YTD": "0", "LAST_SEASON": "12"}[tf]
+            return {"tableHeader": G_HEADER, "statsTable": [
+                {**_row("fag", "G", [gp, "5", "300", "30", "330", "700:00"]),
+                 "cells": [{"content": "FA"}] + [{"content": v} for v in [gp, "5", "300", "30", "330", "700:00"]]}]}
+        rows = []
+        for pid, gp in (("fa_played", {"PROJ_SEASON": "70", "YTD": "2", "LAST_SEASON": "0"}),
+                        ("fa_never", {"PROJ_SEASON": "5", "YTD": "0", "LAST_SEASON": "0"})):
+            vals = [gp[tf], "1", "1", "0", "5", "0", "0", "3", "2", "1", "0", "30:00"]
+            rows.append({"scorer": {"scorerId": pid, "name": pid, "teamShortName": "BOS", "posShortNames": "D"},
+                         "cells": [{"content": "FA"}] + [{"content": v} for v in vals]})
+        return {"tableHeader": SK_HEADER, "statsTable": rows}
+
+    monkeypatch.setattr(srv.FX, "call", call)
+    out = asyncio.run(srv.get_league_rosters(["PROJ_SEASON"], include_free_agents=True))
+    fa = next(t for t in out["teams"] if t["code"] == "FA")
+    ids = [p["fantrax_id"] for p in fa["players"]]
+    assert ids == ["fa_played", "fag"]                     # fa_never has 0 GP in YTD and LAST_SEASON
+    p = fa["players"][0]
+    assert p["roster_status"] is None and set(p["stats"]) == {"PROJ_SEASON"}
+    assert p["stats"]["PROJ_SEASON"]["GP"] == 70 and p["stats"]["PROJ_SEASON"]["TOI"] is None
+    assert fa["players"][1]["stats"]["PROJ_SEASON"]["SA"] == 330
+    # YTD + LAST_SEASON were pulled for the filter although only PROJ_SEASON was asked for
+    fa_tfs = {d["seasonOrProjection"] for d in sent if d["statusOrTeamFilter"] == "ALL_AVAILABLE"}
+    assert fa_tfs == {v[0] for v in EXPECTED.values()}
+    assert "errors" not in out
+
+
+def test_free_agent_failure_is_partial(srv, monkeypatch):
+    _fake_fantrax(srv, monkeypatch)
+    real_call = srv.FX.call
+
+    async def call(method, **data):
+        if data["statusOrTeamFilter"] == "ALL_AVAILABLE" and data["seasonOrProjection"].startswith("SEASON_31l"):
+            raise FantraxError(method, data, {"code": "INVALID_REQUEST"})
+        return await real_call(method, **data)
+
+    monkeypatch.setattr(srv.FX, "call", call)
+    out = asyncio.run(srv.get_league_rosters(["YTD"], include_free_agents=True))
+    assert out["incomplete"] == ["FA:LAST_SEASON/goalies", "FA:LAST_SEASON/skaters"]
+    assert all(e["scope"] == "free_agents" for e in out["errors"])
+    assert any(t["code"] == "FA" for t in out["teams"])

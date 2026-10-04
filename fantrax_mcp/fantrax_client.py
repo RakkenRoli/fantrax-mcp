@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from .cache import TTLCache
+from .cookie_store import write_back
 from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP, TEAM_CODES
 from .config import Settings, nhl_abbrev
 from .league_data import (GOALIE_RAW, SKATER_RAW, injury_status, owner_team_id,
@@ -151,6 +152,8 @@ class FantraxClient:
         # Fantrax rotates session cookies on responses; parallel requests on one session
         # can race that rotation. Default: one request at a time (cached results are free).
         self._gate = asyncio.Semaphore(max(1, int(os.environ.get("FANTRAX_MAX_CONCURRENCY", "1"))))
+        self._writeback = os.environ.get("FANTRAX_COOKIE_WRITEBACK", "").strip().lower() in ("1", "true", "yes")
+        self._writeback_failed = False
 
     async def call(self, method: str, **data: Any) -> dict:
         if method not in READ_METHODS:
@@ -171,6 +174,7 @@ class FantraxClient:
             body = r.json()
             err = body.get("pageError")
             if not err:
+                self._persist_cookies(r)
                 return body["responses"][0]["data"]
             if err.get("code") == "WARNING_NOT_LOGGED_IN":
                 raise NotLoggedIn("Fantrax cookie expired — re-export it from the browser")
@@ -180,6 +184,22 @@ class FantraxClient:
                 raise FantraxError(method, data, err)
             await asyncio.sleep(1.0)       # one retry: transient session/rotation errors
         raise AssertionError("unreachable")
+
+    def _persist_cookies(self, r: httpx.Response) -> None:
+        """Opt-in: keep the cookie file in step with cookies Fantrax refreshes, so a restart
+        never falls back to a stale login. A write failure is logged once and disables it."""
+        if not self._writeback or self._writeback_failed:
+            return
+        headers = r.headers.get_list("set-cookie")
+        if not headers:
+            return
+        try:
+            if write_back(self.s.cookie_file, headers, self._NOISE_COOKIE_PREFIXES):
+                log.info("Refreshed Fantrax cookies written to %s", self.s.cookie_file)
+        except OSError as ex:
+            self._writeback_failed = True
+            log.warning("Cookie write-back disabled: cannot write %s (%s). See README.",
+                        self.s.cookie_file, ex)
 
     async def cached(self, ttl: float, method: str, **data: Any) -> dict:
         key = (method, json.dumps(data, sort_keys=True))

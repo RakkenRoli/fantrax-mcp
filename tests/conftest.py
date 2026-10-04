@@ -17,6 +17,7 @@ os.environ["FANTRAX_TEAM_NAME"] = "Gazdagréti Taxisok"   # the team in the comm
 os.environ["FANTRAX_COOKIE_FILE"] = str(DUMMY_SESSION)
 os.environ.pop("FANTRAX_TEAM_ID", None)
 os.environ.pop("MCP_AUTH_TOKEN", None)
+os.environ.pop("FANTRAX_COOKIE_WRITEBACK", None)   # tests never persist cookies
 
 
 @pytest.fixture(autouse=True)

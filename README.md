@@ -28,7 +28,7 @@ in charge in Fantrax; the server just gives Claude accurate numbers to reason wi
 | `get_league_matchups(week)` | Every pairing for a week, plus bye teams |
 | `get_league_schedule` | All periods: pairings, byes, playoff rounds |
 | `get_roster(team)` | A roster with positions, NHL team, status, injury notes and stats |
-| `get_league_rosters(timeframes)` | Every roster in one call, with raw season totals per timeframe |
+| `get_league_rosters(timeframes, include_free_agents)` | Every roster in one call, with raw season totals per timeframe; optionally free agents (code `FA`) as a baseline |
 | `get_free_agents(position, ...)` | Available players, sortable by any category |
 | `get_goalie_stats(team)` | Goalie W / GAA / SV / SV% plus goals against, shots against and minutes |
 | `get_daily_player_stats(date)` | Everyone who played on a date: owner, lineup slot that day, raw stats |
@@ -194,6 +194,8 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
 | `SEASON_FIRST_DAY` / `SEASON_LAST_DAY` / `N_WEEKS` | | 2026-27 season | Fallback calendar, used only if Fantrax's own calendar can't be read |
 | `NHL_SEASON` | | `20262027` | NHL season for schedule lookups |
 | `FANTRAX_MAX_CONCURRENCY` | | `1` | Parallel requests to Fantrax. Keep at 1 unless you know your session tolerates more |
+| `FANTRAX_COOKIE_WRITEBACK` | | off | `1` = save cookies Fantrax refreshes back to the cookie file (see below) |
+| `GOALIE_MIN_PENALTY` | | | What your league does when a team misses the goalie minimum, copied from the Rules page (e.g. `"GAA and SV% count as losses"`). Returned by `league_info` |
 
 ---
 
@@ -203,6 +205,19 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
   browser. `session_health` shows the expiry date and warns three days ahead. To renew,
   export the cookies again and overwrite the file. The server picks up the new file on
   the next call, so no restart is needed.
+- **Optional: let the server keep the cookie fresh.** Fantrax refreshes some cookies on
+  its responses. With `FANTRAX_COOKIE_WRITEBACK=1` the server merges those back into the
+  cookie file (atomically, only cookies already in the file, never deletions), so a
+  restart doesn't fall back to an older login. The service needs write access to the
+  folder for that, which the default unit blocks on purpose:
+  ```bash
+  sudo systemctl edit fantrax-mcp     # add the two lines below
+  #   [Service]
+  #   ReadWritePaths=/etc/fantrax-mcp
+  sudo chmod 770 /etc/fantrax-mcp && sudo chmod 660 /etc/fantrax-mcp/fantrax_cookies.json
+  sudo systemctl restart fantrax-mcp
+  ```
+  If the server can't write, it logs one warning and carries on without write-back.
 - **Updating:**
   ```bash
   cd /opt/fantrax-mcp && sudo git pull --ff-only && sudo .venv/bin/pip install -q . \

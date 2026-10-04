@@ -5,6 +5,7 @@ import asyncio
 import functools
 import hmac
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -38,7 +39,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.3.1")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.4.0")
 ET = ZoneInfo("America/New_York")
 
 
@@ -160,6 +161,12 @@ async def league_info() -> dict:
         "skater_categories": SKATER_CATS,
         "goalie_categories": GOALIE_CATS,
         "goalie_min_games": GOALIE_MIN_GAMES,
+        "goalie_min_rule": {
+            "min_games": GOALIE_MIN_GAMES,
+            "penalty_if_missed": os.environ.get("GOALIE_MIN_PENALTY") or None,
+            "source": "GOALIE_MIN_PENALTY setting" if os.environ.get("GOALIE_MIN_PENALTY") else
+                      "not exposed by Fantrax's read API; set GOALIE_MIN_PENALTY from the league Rules page",
+        },
         "current_week": current_week(weeks),
         "weeks": {k: [s.isoformat(), e.isoformat()] for k, (s, e) in weeks.items()},
         "timeframes": list((await FX.season_codes()).keys()),
@@ -552,15 +559,56 @@ async def _goalie_gp_so_far(team_ids: list[str], start: date, end: date) -> dict
     return out
 
 
+# Fantrax data for these timeframes changes at different speeds.
+_TF_TTL = {"PROJ_SEASON": 6 * 3600, "YTD": 3600, "LAST_SEASON": 24 * 3600}
+
+
+async def _timeframe_stats(status_filter: str, tfs: list[str], errors: list[dict],
+                           label: str) -> tuple[dict[str, dict[str, dict]], dict[str, dict]]:
+    """({tf: {fantrax_id: raw stats}}, {fantrax_id: identity row}) for one status filter.
+    A failed (timeframe, group) is appended to `errors` and skipped."""
+    stats: dict[str, dict[str, dict]] = {}
+    ident: dict[str, dict] = {}
+    for tf in tfs:
+        stats[tf] = {}
+        for group, standard in (("HOCKEY_SKATING", False), ("POS_201", True)):
+            try:
+                rows = await FX.stats_rows(status_filter, group, tf, standard=standard,
+                                           ttl=_TF_TTL.get(tf, 900))
+            except Exception as ex:  # noqa: BLE001 — report per timeframe, keep the rest
+                errors.append({"scope": label, "timeframe": tf,
+                               "group": "skaters" if group == "HOCKEY_SKATING" else "goalies",
+                               "error": f"{type(ex).__name__}: {ex}",
+                               "request": getattr(ex, "data", None)})
+                continue
+            for r in rows:
+                stats[tf][r["fantrax_id"]] = blank_projection_gaps(r["stats"], tf)
+                ident.setdefault(r["fantrax_id"], r)
+    return stats, ident
+
+
+def _player_out(p: dict, stats: dict[str, dict[str, dict]], tfs: list[str]) -> dict:
+    keys = GOALIE_OUT if "G" in p["positions"] else SKATER_OUT
+    return {"fantrax_id": p["fantrax_id"], "name": p["name"], "positions": p["positions"],
+            "nhl_team": p["nhl_team"], "roster_status": p.get("roster_status"),
+            "injury_status": p.get("injury_status"), "start_status": p.get("start_status"),
+            "stats": {tf: _pick(stats.get(tf, {}).get(p["fantrax_id"]), keys) for tf in tfs}}
+
+
 @tool()
-async def get_league_rosters(timeframes: list[str] | None = None) -> dict:
+async def get_league_rosters(timeframes: list[str] | None = None,
+                             include_free_agents: bool = False) -> dict:
     """Every team's roster in one call. Per player: fantrax_id, name, positions, nhl_team,
     roster_status (active/reserve/injured_reserve), injury_status, start_status (goalies),
     and per timeframe the RAW totals plus GP (no per-game division, no rounding).
     Skaters: GP G A PIM SOG PPG PPA Hit Blk Tk FOW TOI. Goalies: GP W SV GA SA MIN.
     timeframes: any of PROJ_SEASON, YTD, LAST_SEASON (default all three). Fantrax does
     not project Tk or TOI: they are null under PROJ_SEASON. A timeframe value is null when
-    Fantrax has no row for the player (e.g. no NHL games last season)."""
+    Fantrax has no row for the player (e.g. no NHL games last season).
+    include_free_agents: also return unrostered players as an extra team with code "FA"
+    (same fields and timeframes), limited to players with >= 1 GP in YTD or LAST_SEASON.
+    The first call pulls the whole player pool and can take a minute; later calls are cached.
+    If a request fails, the rest is still returned: see `errors` and `incomplete`."""
     tfs = list(timeframes or ROSTER_TIMEFRAMES)
     bad = [t for t in tfs if t not in ROSTER_TIMEFRAMES]
     if bad:
@@ -568,40 +616,32 @@ async def get_league_rosters(timeframes: list[str] | None = None) -> dict:
                          "PROJ_GAME is not per game and is not offered here.")
     teams = await FX.teams()
     rosters = await _gather([FX.roster(tid, None) for tid in teams])
-    stats: dict[str, dict[str, dict]] = {}
     errors: list[dict] = []
-    for tf in tfs:
-        stats[tf] = {}
-        for group, standard in (("HOCKEY_SKATING", False), ("POS_201", True)):
-            try:
-                rows = await FX.stats_rows("ALL_TAKEN", group, tf, standard=standard)
-            except Exception as ex:  # noqa: BLE001 — report per timeframe, keep the rest
-                errors.append({"timeframe": tf, "group": "skaters" if group == "HOCKEY_SKATING" else "goalies",
-                               "error": f"{type(ex).__name__}: {ex}",
-                               "request": getattr(ex, "data", None)})
-                continue
-            stats[tf].update({r["fantrax_id"]: blank_projection_gaps(r["stats"], tf) for r in rows})
-    failed = {(e["timeframe"], e["group"]) for e in errors}
+    stats, _ = await _timeframe_stats("ALL_TAKEN", tfs, errors, "rostered")
     out = []
     for (tid, name), ros in zip(teams.items(), rosters):
         if isinstance(ros, Exception):
             out.append({"team_id": tid, "code": team_code(tid), "name": name, "error": str(ros)})
             continue
-        players = []
-        for p in ros["players"]:
-            keys = GOALIE_OUT if "G" in p["positions"] else SKATER_OUT
-            players.append({
-                "fantrax_id": p["fantrax_id"], "name": p["name"], "positions": p["positions"],
-                "nhl_team": p["nhl_team"], "roster_status": p.get("roster_status"),
-                "injury_status": p.get("injury_status"), "start_status": p.get("start_status"),
-                "stats": {tf: _pick(stats[tf].get(p["fantrax_id"]), keys) for tf in tfs},
-            })
-        out.append({"team_id": tid, "code": team_code(tid), "name": name, "players": players})
+        out.append({"team_id": tid, "code": team_code(tid), "name": name,
+                    "players": [_player_out(p, stats, tfs) for p in ros["players"]]})
+
+    if include_free_agents:
+        # YTD and LAST_SEASON decide who is kept, even when not requested for output.
+        pull = list(dict.fromkeys(tfs + ["YTD", "LAST_SEASON"]))
+        fa_stats, fa_ident = await _timeframe_stats("ALL_AVAILABLE", pull, errors, "free_agents")
+        played = {pid for tf in ("YTD", "LAST_SEASON")
+                  for pid, st in fa_stats.get(tf, {}).items() if (st.get("GP") or 0) >= 1}
+        fa_players = [_player_out({**fa_ident[pid], "roster_status": None}, fa_stats, tfs)
+                      for pid in sorted(played, key=lambda i: fa_ident[i]["name"] or "")]
+        out.append({"team_id": None, "code": "FA", "name": "Free agents", "players": fa_players})
+
     res = {"timeframes": tfs, "teams": out}
     if errors:
-        # A failed (timeframe, group) leaves those players' values null; see "errors".
+        # A failed (scope, timeframe, group) leaves those values null; see "errors".
         res["errors"] = errors
-        res["incomplete"] = sorted(f"{tf}/{g}" for tf, g in failed)
+        res["incomplete"] = sorted({f"{e['timeframe']}/{e['group']}" if e["scope"] == "rostered"
+                                    else f"FA:{e['timeframe']}/{e['group']}" for e in errors})
     return res
 
 

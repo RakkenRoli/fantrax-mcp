@@ -2,6 +2,20 @@
 
 Changes to tool output that client code should know about. Newest first.
 
+## 0.4.0
+
+Breaking changes for the website code: none; all additive.
+
+- `get_league_rosters(..., include_free_agents=True)` adds a team entry with `code: "FA"`
+  and `team_id: null`: unrostered players with >= 1 GP in YTD or LAST_SEASON, same
+  per-player fields and timeframes, `roster_status: null`. Failures of the free-agent
+  pulls show up in `incomplete` with an `FA:` prefix (e.g. `"FA:LAST_SEASON/goalies"`).
+- `errors[]` entries in `get_league_rosters` gain `scope` (`"rostered"` | `"free_agents"`).
+- `league_info` gains `goalie_min_rule`: `{min_games, penalty_if_missed, source}`.
+  `penalty_if_missed` is null unless `GOALIE_MIN_PENALTY` is set; Fantrax's read API does
+  not expose the rule text.
+- Optional cookie write-back (`FANTRAX_COOKIE_WRITEBACK=1`); no output change.
+
 ## 0.3.1
 
 - `get_league_rosters` no longer fails as a whole when Fantrax rejects one request. A
