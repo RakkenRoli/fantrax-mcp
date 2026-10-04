@@ -193,6 +193,7 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
 | `ROSTER_SIZE` / `IR_SLOTS` | | `23` / `6` | Roster cap (IR not counted) and IR slots |
 | `SEASON_FIRST_DAY` / `SEASON_LAST_DAY` / `N_WEEKS` | | 2026-27 season | Fallback calendar, used only if Fantrax's own calendar can't be read |
 | `NHL_SEASON` | | `20262027` | NHL season for schedule lookups |
+| `FANTRAX_MAX_CONCURRENCY` | | `1` | Parallel requests to Fantrax. Keep at 1 unless you know your session tolerates more |
 
 ---
 

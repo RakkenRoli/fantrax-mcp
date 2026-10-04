@@ -1,0 +1,55 @@
+{
+ "_source": "getPlayerStats meta, 2026-10-04, trimmed to seasonOrProjections",
+ "seasonOrProjections": [
+  {
+   "code": "PROJECTION_0_31n_EVENT_PROJECTED_WEEKLY",
+   "name": "Projected - Per Game",
+   "timeframeTypeCode": "PROJECTED_WEEKLY"
+  },
+  {
+   "code": "PROJECTION_0_31n_SEASON",
+   "name": "Projected - Season",
+   "timeframeTypeCode": "PROJECTED_SEASON"
+  },
+  {
+   "code": "SEASON_31n_YEAR_TO_DATE",
+   "name": "2026-27 Reg Season - YTD",
+   "timeframeTypeCode": "YEAR_TO_DATE"
+  },
+  {
+   "code": "SEASON_31n_BY_PERIOD",
+   "name": "2026-27 Reg Season - Period",
+   "timeframeTypeCode": "BY_PERIOD"
+  },
+  {
+   "code": "SEASON_31n_BY_DATE",
+   "name": "2026-27 Reg Season - Dates",
+   "timeframeTypeCode": "BY_DATE"
+  },
+  {
+   "code": "SEASON_31l_YEAR_TO_DATE",
+   "name": "2025-26 Reg Season - YTD",
+   "timeframeTypeCode": "YEAR_TO_DATE"
+  },
+  {
+   "code": "SEASON_31l_BY_DATE",
+   "name": "2025-26 Reg Season - Dates",
+   "timeframeTypeCode": "BY_DATE"
+  },
+  {
+   "code": "SEASON_31j_YEAR_TO_DATE",
+   "name": "2024-25 Reg Season - YTD",
+   "timeframeTypeCode": "YEAR_TO_DATE"
+  },
+  {
+   "code": "SEASON_31m_YEAR_TO_DATE",
+   "name": "2025-26 Playoffs - YTD",
+   "timeframeTypeCode": "YEAR_TO_DATE"
+  }
+ ],
+ "accepted_with_ALL_TAKEN_500": {
+  "PROJ_SEASON": "HOCKEY_SKATING ok",
+  "YTD": "HOCKEY_SKATING ok",
+  "LAST_SEASON": "HOCKEY_SKATING ok"
+ }
+}

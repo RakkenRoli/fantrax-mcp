@@ -38,7 +38,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.3.0")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.3.1")
 ET = ZoneInfo("America/New_York")
 
 
@@ -569,10 +569,19 @@ async def get_league_rosters(timeframes: list[str] | None = None) -> dict:
     teams = await FX.teams()
     rosters = await _gather([FX.roster(tid, None) for tid in teams])
     stats: dict[str, dict[str, dict]] = {}
+    errors: list[dict] = []
     for tf in tfs:
-        sk = await FX.stats_rows("ALL_TAKEN", "HOCKEY_SKATING", tf)
-        go = await FX.stats_rows("ALL_TAKEN", "POS_201", tf, standard=True)
-        stats[tf] = {r["fantrax_id"]: blank_projection_gaps(r["stats"], tf) for r in sk + go}
+        stats[tf] = {}
+        for group, standard in (("HOCKEY_SKATING", False), ("POS_201", True)):
+            try:
+                rows = await FX.stats_rows("ALL_TAKEN", group, tf, standard=standard)
+            except Exception as ex:  # noqa: BLE001 — report per timeframe, keep the rest
+                errors.append({"timeframe": tf, "group": "skaters" if group == "HOCKEY_SKATING" else "goalies",
+                               "error": f"{type(ex).__name__}: {ex}",
+                               "request": getattr(ex, "data", None)})
+                continue
+            stats[tf].update({r["fantrax_id"]: blank_projection_gaps(r["stats"], tf) for r in rows})
+    failed = {(e["timeframe"], e["group"]) for e in errors}
     out = []
     for (tid, name), ros in zip(teams.items(), rosters):
         if isinstance(ros, Exception):
@@ -588,7 +597,12 @@ async def get_league_rosters(timeframes: list[str] | None = None) -> dict:
                 "stats": {tf: _pick(stats[tf].get(p["fantrax_id"]), keys) for tf in tfs},
             })
         out.append({"team_id": tid, "code": team_code(tid), "name": name, "players": players})
-    return {"timeframes": tfs, "teams": out}
+    res = {"timeframes": tfs, "teams": out}
+    if errors:
+        # A failed (timeframe, group) leaves those players' values null; see "errors".
+        res["errors"] = errors
+        res["incomplete"] = sorted(f"{tf}/{g}" for tf, g in failed)
+    return res
 
 
 @tool()

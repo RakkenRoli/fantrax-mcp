@@ -1,0 +1,132 @@
+"""get_league_rosters: timeframe codes, per-timeframe isolation, diagnosable Fantrax errors.
+
+season_options_2026-10-04.json is the real seasonOrProjections list (trimmed). On 2026-10-04
+each of these was accepted live with statusOrTeamFilter=ALL_TAKEN, positionOrGroup=
+HOCKEY_SKATING, maxResultsPerPage=500:
+  PROJ_SEASON -> PROJECTION_0_31n_SEASON / PROJECTED_SEASON
+  YTD         -> SEASON_31n_YEAR_TO_DATE / YEAR_TO_DATE
+  LAST_SEASON -> SEASON_31l_YEAR_TO_DATE / YEAR_TO_DATE   (not 31m: that is 2025-26 playoffs)
+"""
+import asyncio
+import json
+from pathlib import Path
+
+import pytest
+
+from fantrax_mcp.fantrax_client import FantraxError
+
+OPTS = json.loads((Path(__file__).parent / "fixtures" / "season_options_2026-10-04.json")
+                  .read_text(encoding="utf-8"))
+EXPECTED = {"PROJ_SEASON": ("PROJECTION_0_31n_SEASON", "PROJECTED_SEASON"),
+            "YTD": ("SEASON_31n_YEAR_TO_DATE", "YEAR_TO_DATE"),
+            "LAST_SEASON": ("SEASON_31l_YEAR_TO_DATE", "YEAR_TO_DATE")}
+SK_HEADER = {"cells": [{"key": "status"}] + [{"scipId": f"2010#{i}#-1"} for i in
+             ("2100", "2130", "2090", "2170", "2270", "2210", "2200", "2147", "2092", "2295", "2096", "2300")]}
+G_HEADER = {"cells": [{"key": "status"}] + [{"scipId": f"2020#{i}#-1"} for i in
+            ("2100", "231b", "2230", "2140", "2280", "2298")]}
+OC = "wge2dwlrmtr5w0js"
+
+
+def _row(pid, pos, vals):
+    return {"scorer": {"scorerId": pid, "name": pid, "teamShortName": "BOS", "posShortNames": pos},
+            "cells": [{"content": "OC", "teamId": OC}] + [{"content": v} for v in vals]}
+
+
+@pytest.fixture
+def srv(monkeypatch):
+    from fantrax_mcp import server
+
+    async def meta(group=None):
+        return {"seasonOrProjections": OPTS["seasonOrProjections"]}
+
+    async def teams():
+        return {OC: "Onga Capitals"}
+
+    async def roster(tid, timeframe):
+        return {"team_id": tid, "players": [
+            {"fantrax_id": "sk1", "name": "Skater", "positions": ["C"], "nhl_team": "BOS"},
+            {"fantrax_id": "g1", "name": "Goalie", "positions": ["G"], "nhl_team": "BOS"}]}
+
+    monkeypatch.setattr(server.FX, "_meta", meta)
+    monkeypatch.setattr(server.FX, "teams", teams)
+    monkeypatch.setattr(server.FX, "roster", roster)
+    server.FX._cache = type(server.FX._cache)()
+    return server
+
+
+def _fake_fantrax(srv, monkeypatch, fail=None):
+    sent = []
+
+    async def call(method, **data):
+        sent.append(data)
+        tf = next(k for k, v in EXPECTED.items() if v[0] == data["seasonOrProjection"])
+        group = data["positionOrGroup"]
+        if fail and (tf, group) == fail:
+            raise FantraxError(method, data, {"code": "INVALID_REQUEST"})
+        if group == "POS_201":
+            return {"tableHeader": G_HEADER, "statsTable": [_row("g1", "G", ["56", "29", "1396", "140", "1536", "3300:30"])]}
+        toi = "" if tf == "PROJ_SEASON" else "1500:00"
+        return {"tableHeader": SK_HEADER,
+                "statsTable": [_row("sk1", "C", ["81", "29", "50", "20", "250", "8", "15", "40", "30", "0", "600", toi])]}
+
+    monkeypatch.setattr(srv.FX, "call", call)
+    return sent
+
+
+def test_timeframe_codes_from_recorded_options(srv):
+    codes = asyncio.run(srv.FX.season_codes())
+    for tf, want in EXPECTED.items():
+        assert codes[tf] == want
+
+
+@pytest.mark.parametrize("tf", list(EXPECTED))
+def test_each_timeframe_alone(srv, monkeypatch, tf):
+    sent = _fake_fantrax(srv, monkeypatch)
+    out = asyncio.run(srv.get_league_rosters([tf]))
+    assert "errors" not in out
+    assert {(d["statusOrTeamFilter"], d["positionOrGroup"], d["seasonOrProjection"], d["timeframeTypeCode"])
+            for d in sent} == {("ALL_TAKEN", g, *EXPECTED[tf]) for g in ("HOCKEY_SKATING", "POS_201")}
+    assert all(d.get("scoringCategoryType") == "1" for d in sent if d["positionOrGroup"] == "POS_201")
+    players = {p["fantrax_id"]: p for p in out["teams"][0]["players"]}
+    sk, g = players["sk1"]["stats"][tf], players["g1"]["stats"][tf]
+    assert sk["GP"] == 81 and sk["FOW"] == 600
+    assert (sk["Tk"], sk["TOI"]) == ((None, None) if tf == "PROJ_SEASON" else (0, 1500))
+    assert g == {"GP": 56, "W": 29, "SV": 1396, "GA": 140, "SA": 1536, "MIN": 3300.5}
+
+
+def test_one_failing_timeframe_does_not_sink_the_rest(srv, monkeypatch):
+    _fake_fantrax(srv, monkeypatch, fail=("PROJ_SEASON", "HOCKEY_SKATING"))
+    out = asyncio.run(srv.get_league_rosters(["PROJ_SEASON", "YTD", "LAST_SEASON"]))
+    assert out["incomplete"] == ["PROJ_SEASON/skaters"]
+    err = out["errors"][0]
+    assert err["timeframe"] == "PROJ_SEASON" and err["group"] == "skaters"
+    assert "INVALID_REQUEST" in err["error"]
+    assert err["request"]["seasonOrProjection"] == "PROJECTION_0_31n_SEASON"
+    players = {p["fantrax_id"]: p for p in out["teams"][0]["players"]}
+    assert players["sk1"]["stats"]["PROJ_SEASON"] is None          # failed part -> null
+    assert players["sk1"]["stats"]["YTD"]["GP"] == 81             # rest intact
+    assert players["g1"]["stats"]["PROJ_SEASON"]["W"] == 29       # goalies of same tf intact
+
+
+def test_invalid_request_is_retried_once_then_reported_with_the_request(srv, monkeypatch):
+    import httpx
+    bodies = [{"pageError": {"code": "INVALID_REQUEST"}},
+              {"responses": [{"data": {"ok": 1}}]},
+              {"pageError": {"code": "INVALID_REQUEST"}}, {"pageError": {"code": "INVALID_REQUEST"}}]
+    posts = []
+
+    async def post(url, params=None, json=None):
+        posts.append(json)
+        return httpx.Response(200, json=bodies[len(posts) - 1], request=httpx.Request("POST", url))
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(srv.FX._http, "post", post)
+    monkeypatch.setattr("fantrax_mcp.fantrax_client.asyncio.sleep", no_sleep)
+    assert asyncio.run(srv.FX._post("getPlayerStats", {"x": "1"})) == {"ok": 1}     # retry wins
+    with pytest.raises(FantraxError) as ei:
+        asyncio.run(srv.FX._post("getPlayerStats", {"statusOrTeamFilter": "ALL_TAKEN"}))
+    assert ei.value.code == "INVALID_REQUEST" and len(posts) == 4
+    assert '"statusOrTeamFilter": "ALL_TAKEN"' in str(ei.value)
+    assert "cookie" not in str(ei.value).lower()

@@ -10,7 +10,10 @@ Calibrated against the live league (2026-09-27):
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -47,6 +50,18 @@ POS_GROUP = {"SKATERS": "HOCKEY_SKATING", "C": "POS_206", "LW": "POS_203",
              "RW": "POS_204", "D": "POS_202", "G": "POS_201"}
 TIMEFRAMES = ("PROJ_SEASON", "PROJ_GAME", "YTD", "LAST_SEASON")
 _TOI_RE = re.compile(r"^(\d+):(\d{2})$")
+
+
+log = logging.getLogger("fantrax_mcp")
+
+
+class FantraxError(RuntimeError):
+    """Fantrax answered with a pageError. Carries the request (never cookies) for diagnosis."""
+
+    def __init__(self, method: str, data: dict, error: dict) -> None:
+        self.method, self.data, self.error = method, data, error
+        self.code = (error or {}).get("code")
+        super().__init__(f"Fantrax {self.code or 'error'} on {method} {json.dumps(data, sort_keys=True)}: {error}")
 
 
 class NotLoggedIn(RuntimeError):
@@ -133,6 +148,9 @@ class FantraxClient:
             headers={"User-Agent": "Mozilla/5.0 (fantrax-mcp read-only)"},
         )
         self._cache = TTLCache()
+        # Fantrax rotates session cookies on responses; parallel requests on one session
+        # can race that rotation. Default: one request at a time (cached results are free).
+        self._gate = asyncio.Semaphore(max(1, int(os.environ.get("FANTRAX_MAX_CONCURRENCY", "1"))))
 
     async def call(self, method: str, **data: Any) -> dict:
         if method not in READ_METHODS:
@@ -146,15 +164,22 @@ class FantraxClient:
 
     async def _post(self, method: str, data: dict) -> dict:
         payload = {"msgs": [{"method": method, "data": {"leagueId": self.s.league_id, **data}}]}
-        r = await self._http.post(FXPA_URL, params={"leagueId": self.s.league_id}, json=payload)
-        r.raise_for_status()
-        body = r.json()
-        err = body.get("pageError")
-        if err:
+        for attempt in (1, 2):
+            async with self._gate:
+                r = await self._http.post(FXPA_URL, params={"leagueId": self.s.league_id}, json=payload)
+            r.raise_for_status()
+            body = r.json()
+            err = body.get("pageError")
+            if not err:
+                return body["responses"][0]["data"]
             if err.get("code") == "WARNING_NOT_LOGGED_IN":
                 raise NotLoggedIn("Fantrax cookie expired — re-export it from the browser")
-            raise RuntimeError(f"Fantrax error: {err}")
-        return body["responses"][0]["data"]
+            log.warning("Fantrax %s on %s data=%s (attempt %d)", err.get("code"), method,
+                        json.dumps(data, sort_keys=True), attempt)
+            if err.get("code") != "INVALID_REQUEST" or attempt == 2:
+                raise FantraxError(method, data, err)
+            await asyncio.sleep(1.0)       # one retry: transient session/rotation errors
+        raise AssertionError("unreachable")
 
     async def cached(self, ttl: float, method: str, **data: Any) -> dict:
         key = (method, json.dumps(data, sort_keys=True))
