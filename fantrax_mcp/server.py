@@ -18,7 +18,7 @@ from .config import (GOALIE_CATS, GOALIE_MIN_GAMES, LIGHT_NIGHT_MAX_GAMES, LINEU
                      IR_SLOTS, ROSTER_SIZE, SKATER_CATS, Settings, current_week, nhl_abbrev,
                      parse_periods, week_ranges)
 from .categories import TEAM_CODES, check_against_live, label, label_keys, team_code
-from .fantrax_client import READ_METHODS, FantraxClient
+from .fantrax_client import READ_METHODS, FantraxClient, FantraxError, NotLoggedIn
 from .lineup import LineupPlayer, plan_week, simulate_week, starts_by_position
 from .nhl_client import NHLClient
 from .standings import find_team, slim_raw
@@ -39,7 +39,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.4.0")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.4.1")
 ET = ZoneInfo("America/New_York")
 
 
@@ -61,6 +61,11 @@ def stamped(fn):
             # Bad input (unknown team, week out of range...). Return the message instead of
             # letting the MCP layer collapse it into a bare "Error executing tool".
             out = {"error": str(e)}
+        except FantraxError as e:
+            # Fantrax rejected a request the tool could not do without (after retries).
+            out = {"error": str(e), "request": {"method": e.method, "data": e.data}}
+        except NotLoggedIn as e:
+            out = {"error": str(e), "logged_in": False}
         if isinstance(out, dict):
             return {**out, **fetch_stamp()}
         return out
@@ -563,24 +568,44 @@ async def _goalie_gp_so_far(team_ids: list[str], start: date, end: date) -> dict
 _TF_TTL = {"PROJ_SEASON": 6 * 3600, "YTD": 3600, "LAST_SEASON": 24 * 3600}
 
 
+# How old a last good copy may be when Fantrax rejects a refresh.
+_STALE_MAX = {"PROJ_SEASON": 48 * 3600, "LAST_SEASON": 48 * 3600, "YTD": 24 * 3600}
+
+
+def _iso_minute(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+
+
 async def _timeframe_stats(status_filter: str, tfs: list[str], errors: list[dict],
-                           label: str) -> tuple[dict[str, dict[str, dict]], dict[str, dict]]:
+                           label: str, stale: list[str] | None = None,
+                           ) -> tuple[dict[str, dict[str, dict]], dict[str, dict]]:
     """({tf: {fantrax_id: raw stats}}, {fantrax_id: identity row}) for one status filter.
-    A failed (timeframe, group) is appended to `errors` and skipped."""
+    A failed (timeframe, group) is logged in `errors`; if a last good copy is young enough
+    it is used instead and listed in `stale` ("YTD/skaters@2026-10-04T06:00Z")."""
     stats: dict[str, dict[str, dict]] = {}
     ident: dict[str, dict] = {}
+    prefix = "" if label == "rostered" else "FA:"
     for tf in tfs:
         stats[tf] = {}
         for group, standard in (("HOCKEY_SKATING", False), ("POS_201", True)):
+            gname = "skaters" if group == "HOCKEY_SKATING" else "goalies"
+            key = f"stats|{status_filter}|{group}|{tf}"
             try:
                 rows = await FX.stats_rows(status_filter, group, tf, standard=standard,
                                            ttl=_TF_TTL.get(tf, 900))
+                FX.last_good.put(key, rows)
             except Exception as ex:  # noqa: BLE001 — report per timeframe, keep the rest
-                errors.append({"scope": label, "timeframe": tf,
-                               "group": "skaters" if group == "HOCKEY_SKATING" else "goalies",
-                               "error": f"{type(ex).__name__}: {ex}",
-                               "request": getattr(ex, "data", None)})
-                continue
+                hit = FX.last_good.get(key, _STALE_MAX.get(tf, 24 * 3600))
+                err = {"scope": label, "timeframe": tf, "group": gname,
+                       "error": f"{type(ex).__name__}: {ex}",
+                       "request": getattr(ex, "data", None),
+                       "served_stale": _iso_minute(hit[0]) if hit else None}
+                errors.append(err)
+                if not hit:
+                    continue
+                rows = hit[1]
+                if stale is not None:
+                    stale.append(f"{prefix}{tf}/{gname}@{_iso_minute(hit[0])}")
             for r in rows:
                 stats[tf][r["fantrax_id"]] = blank_projection_gaps(r["stats"], tf)
                 ident.setdefault(r["fantrax_id"], r)
@@ -617,7 +642,10 @@ async def get_league_rosters(timeframes: list[str] | None = None,
     teams = await FX.teams()
     rosters = await _gather([FX.roster(tid, None) for tid in teams])
     errors: list[dict] = []
-    stats, _ = await _timeframe_stats("ALL_TAKEN", tfs, errors, "rostered")
+    stale: list[str] = []
+    # Rostered pool first: the projection depends on it. Free agents last, so their much
+    # bigger pull can't trip Fantrax's burst limit before the rostered data is in.
+    stats, _ = await _timeframe_stats("ALL_TAKEN", tfs, errors, "rostered", stale)
     out = []
     for (tid, name), ros in zip(teams.items(), rosters):
         if isinstance(ros, Exception):
@@ -629,7 +657,7 @@ async def get_league_rosters(timeframes: list[str] | None = None,
     if include_free_agents:
         # YTD and LAST_SEASON decide who is kept, even when not requested for output.
         pull = list(dict.fromkeys(tfs + ["YTD", "LAST_SEASON"]))
-        fa_stats, fa_ident = await _timeframe_stats("ALL_AVAILABLE", pull, errors, "free_agents")
+        fa_stats, fa_ident = await _timeframe_stats("ALL_AVAILABLE", pull, errors, "free_agents", stale)
         played = {pid for tf in ("YTD", "LAST_SEASON")
                   for pid, st in fa_stats.get(tf, {}).items() if (st.get("GP") or 0) >= 1}
         fa_players = [_player_out({**fa_ident[pid], "roster_status": None}, fa_stats, tfs)
@@ -638,10 +666,15 @@ async def get_league_rosters(timeframes: list[str] | None = None,
 
     res = {"timeframes": tfs, "teams": out}
     if errors:
-        # A failed (scope, timeframe, group) leaves those values null; see "errors".
+        # Failed and not covered by a last good copy -> values null, listed in "incomplete".
+        # Covered by a last good copy -> values present, listed in "stale".
         res["errors"] = errors
-        res["incomplete"] = sorted({f"{e['timeframe']}/{e['group']}" if e["scope"] == "rostered"
-                                    else f"FA:{e['timeframe']}/{e['group']}" for e in errors})
+        missing = sorted({("" if e["scope"] == "rostered" else "FA:") + f"{e['timeframe']}/{e['group']}"
+                          for e in errors if not e["served_stale"]})
+        if missing:
+            res["incomplete"] = missing
+    if stale:
+        res["stale"] = sorted(stale)
     return res
 
 

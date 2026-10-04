@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from typing import Any
 import httpx
 
 from .cache import TTLCache
+from .last_good import LastGood
 from .session_store import write_back
 from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP, TEAM_CODES
 from .config import Settings, nhl_abbrev
@@ -154,6 +156,11 @@ class FantraxClient:
         self._gate = asyncio.Semaphore(max(1, int(os.environ.get("FANTRAX_MAX_CONCURRENCY", "1"))))
         self._writeback = os.environ.get("FANTRAX_COOKIE_WRITEBACK", "").strip().lower() in ("1", "true", "yes")
         self._writeback_failed = False
+        # Fantrax rejects bursts with INVALID_REQUEST: space requests out and back off.
+        self._min_interval = float(os.environ.get("FANTRAX_MIN_INTERVAL", "0.75"))
+        self._backoff = [float(x) for x in os.environ.get("FANTRAX_RETRY_BACKOFF", "2,5,15").split(",") if x.strip()]
+        self._last_request = 0.0
+        self.last_good = LastGood(os.environ.get("FANTRAX_STATE_DIR"))
 
     async def call(self, method: str, **data: Any) -> dict:
         if method not in READ_METHODS:
@@ -167,9 +174,21 @@ class FantraxClient:
 
     async def _post(self, method: str, data: dict) -> dict:
         payload = {"msgs": [{"method": method, "data": {"leagueId": self.s.league_id, **data}}]}
-        for attempt in (1, 2):
+        delays = [0.0, *self._backoff]
+        for attempt, delay in enumerate(delays, 1):
+            if delay:
+                await asyncio.sleep(delay)
             async with self._gate:
-                r = await self._http.post(FXPA_URL, params={"leagueId": self.s.league_id}, json=payload)
+                wait = self._last_request + self._min_interval - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                try:
+                    r = await self._http.post(FXPA_URL, params={"leagueId": self.s.league_id}, json=payload)
+                finally:
+                    self._last_request = time.monotonic()
+            if r.status_code in (429, 502, 503, 504) and attempt < len(delays):
+                log.warning("Fantrax HTTP %s on %s (attempt %d)", r.status_code, method, attempt)
+                continue
             r.raise_for_status()
             body = r.json()
             err = body.get("pageError")
@@ -178,11 +197,10 @@ class FantraxClient:
                 return body["responses"][0]["data"]
             if err.get("code") == "WARNING_NOT_LOGGED_IN":
                 raise NotLoggedIn("Fantrax cookie expired — re-export it from the browser")
-            log.warning("Fantrax %s on %s data=%s (attempt %d)", err.get("code"), method,
-                        json.dumps(data, sort_keys=True), attempt)
-            if err.get("code") != "INVALID_REQUEST" or attempt == 2:
+            log.warning("Fantrax %s on %s data=%s (attempt %d/%d)", err.get("code"), method,
+                        json.dumps(data, sort_keys=True), attempt, len(delays))
+            if err.get("code") != "INVALID_REQUEST" or attempt == len(delays):
                 raise FantraxError(method, data, err)
-            await asyncio.sleep(1.0)       # one retry: transient session/rotation errors
         raise AssertionError("unreachable")
 
     def _persist_cookies(self, r: httpx.Response) -> None:
@@ -207,9 +225,21 @@ class FantraxClient:
 
     # ---------- league ----------
     async def teams(self) -> dict[str, str]:
-        data = await self.cached(3600, "getStandings")
+        """{team_id: name}. Teams rarely change, so a failed refresh falls back to the last
+        good list (up to 7 days) instead of failing every tool that needs it."""
+        try:
+            data = await self.cached(3600, "getStandings", view="COMBINED")
+        except FantraxError:
+            hit = self.last_good.get("teams", 7 * 86400)
+            if hit:
+                log.warning("getStandings failed; using team list saved at %s", hit[0])
+                return hit[1]
+            raise
         info = data.get("fantasyTeamInfo") or {}
-        return {tid: t.get("name", tid) for tid, t in info.items()}
+        out = {tid: t.get("name", tid) for tid, t in info.items()}
+        if out:
+            self.last_good.put("teams", out)
+        return out
 
     async def standings_schedule_raw(self, ttl: float = 120) -> dict:
         """getStandings(view=SCHEDULE): every period's cumulative H2H table (~800 KB).

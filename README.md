@@ -194,6 +194,9 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
 | `SEASON_FIRST_DAY` / `SEASON_LAST_DAY` / `N_WEEKS` | | 2026-27 season | Fallback calendar, used only if Fantrax's own calendar can't be read |
 | `NHL_SEASON` | | `20262027` | NHL season for schedule lookups |
 | `FANTRAX_MAX_CONCURRENCY` | | `1` | Parallel requests to Fantrax. Keep at 1 unless you know your session tolerates more |
+| `FANTRAX_MIN_INTERVAL` | | `0.75` | Seconds between requests to Fantrax. Fantrax rejects bursts with `INVALID_REQUEST` |
+| `FANTRAX_RETRY_BACKOFF` | | `2,5,15` | Waits (s) before each retry of a rejected or 429/5xx request |
+| `FANTRAX_STATE_DIR` | | (memory only) | Where last good copies of big pulls are kept across restarts; the shipped unit sets `/var/lib/fantrax-mcp` |
 | `FANTRAX_COOKIE_WRITEBACK` | | off | `1` = save cookies Fantrax refreshes back to the cookie file (see below) |
 | `GOALIE_MIN_PENALTY` | | | What your league does when a team misses the goalie minimum, copied from the Rules page (e.g. `"GAA and SV% count as losses"`). Returned by `league_info` |
 
@@ -218,6 +221,9 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
   sudo systemctl restart fantrax-mcp
   ```
   If the server can't write, it logs one warning and carries on without write-back.
+- **When Fantrax rejects a refresh**, `get_league_rosters` serves the last good copy of
+  that timeframe (up to 48 h for projections and last season, 24 h for YTD) and lists it
+  under `stale`; only if there is none does the part come back `null` under `incomplete`.
 - **Updating:**
   ```bash
   cd /opt/fantrax-mcp && sudo git pull --ff-only && sudo .venv/bin/pip install -q . \

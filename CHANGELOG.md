@@ -2,6 +2,22 @@
 
 Changes to tool output that client code should know about. Newest first.
 
+## 0.4.1
+
+Breaking changes for the website code: none; additive.
+
+- `get_league_rosters` gains `stale`: parts served from the last good copy after Fantrax
+  rejected the refresh, e.g. `"YTD/skaters@2026-10-04T06:00Z"` (`FA:` prefix for free
+  agents). Values are present, not null. Max age: 48 h PROJ_SEASON / LAST_SEASON, 24 h YTD.
+- `incomplete` now lists only parts with no usable copy; it is omitted when empty.
+- `errors[]` entries gain `served_stale` (timestamp or null).
+- A Fantrax failure the tool cannot work around now returns
+  `{"error": "...", "request": {"method", "data"}}` instead of failing the call
+  (2026-10-04 run 2: the team-list request was rejected, which was not covered by the
+  per-timeframe handling; it now also falls back to the last good team list).
+- Fantrax requests: 0.75 s apart, retries after 2 / 5 / 15 s on `INVALID_REQUEST`, 429, 5xx.
+  The rostered pool is always fetched before the free-agent pool.
+
 ## 0.4.0
 
 Breaking changes for the website code: none; all additive.

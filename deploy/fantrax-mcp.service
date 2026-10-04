@@ -7,6 +7,9 @@ Wants=network-online.target
 User=fantrax
 WorkingDirectory=/opt/fantrax-mcp
 EnvironmentFile=/etc/fantrax-mcp/env
+# Last good copies of big pulls, used when Fantrax rejects a refresh (no secrets stored).
+StateDirectory=fantrax-mcp
+Environment=FANTRAX_STATE_DIR=/var/lib/fantrax-mcp
 ExecStart=/opt/fantrax-mcp/.venv/bin/fantrax-mcp
 Restart=on-failure
 RestartSec=5

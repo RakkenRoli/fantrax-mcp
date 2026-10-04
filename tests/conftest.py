@@ -5,6 +5,7 @@ in the shell, setdefault would keep the real cookie path and a test could clobbe
 login. Tests never write to any path taken from the environment.
 """
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,8 @@ os.environ["FANTRAX_COOKIE_FILE"] = str(DUMMY_SESSION)
 os.environ.pop("FANTRAX_TEAM_ID", None)
 os.environ.pop("MCP_AUTH_TOKEN", None)
 os.environ.pop("FANTRAX_COOKIE_WRITEBACK", None)   # tests never persist cookies
+os.environ.pop("FANTRAX_STATE_DIR", None)          # last-good copies stay in memory
+os.environ["FANTRAX_MIN_INTERVAL"] = "0"
 
 
 @pytest.fixture(autouse=True)
@@ -27,4 +30,8 @@ def _no_real_cookie(monkeypatch, tmp_path):
     cookie = tmp_path / "session.json"
     cookie.write_text(DUMMY_SESSION.read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setenv("FANTRAX_COOKIE_FILE", str(cookie))
+    srv = sys.modules.get("fantrax_mcp.server")
+    if srv is not None:                     # no last-good copy leaks between tests
+        from fantrax_mcp.last_good import LastGood
+        monkeypatch.setattr(srv.FX, "last_good", LastGood())
     yield cookie

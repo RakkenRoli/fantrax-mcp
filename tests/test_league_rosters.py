@@ -108,28 +108,58 @@ def test_one_failing_timeframe_does_not_sink_the_rest(srv, monkeypatch):
     assert players["g1"]["stats"]["PROJ_SEASON"]["W"] == 29       # goalies of same tf intact
 
 
-def test_invalid_request_is_retried_once_then_reported_with_the_request(srv, monkeypatch):
+def test_invalid_request_backoff_2_5_15_then_reported_with_the_request(srv, monkeypatch):
     import httpx
-    bodies = [{"pageError": {"code": "INVALID_REQUEST"}},
-              {"responses": [{"data": {"ok": 1}}]},
-              {"pageError": {"code": "INVALID_REQUEST"}}, {"pageError": {"code": "INVALID_REQUEST"}}]
-    posts = []
+    bad = {"pageError": {"code": "INVALID_REQUEST"}}
+    bodies = [bad, bad, {"responses": [{"data": {"ok": 1}}]},      # call 1: wins on attempt 3
+              bad, bad, bad, bad]                                    # call 2: gives up after 4
+    posts, sleeps = [], []
 
     async def post(url, params=None, json=None):
         posts.append(json)
         return httpx.Response(200, json=bodies[len(posts) - 1], request=httpx.Request("POST", url))
 
-    async def no_sleep(_):
-        return None
+    async def fake_sleep(s):
+        sleeps.append(s)
 
     monkeypatch.setattr(srv.FX._http, "post", post)
-    monkeypatch.setattr("fantrax_mcp.fantrax_client.asyncio.sleep", no_sleep)
-    assert asyncio.run(srv.FX._post("getPlayerStats", {"x": "1"})) == {"ok": 1}     # retry wins
+    monkeypatch.setattr("fantrax_mcp.fantrax_client.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(srv.FX, "_min_interval", 0.0)
+    monkeypatch.setattr(srv.FX, "_backoff", [2.0, 5.0, 15.0])
+    assert asyncio.run(srv.FX._post("getPlayerStats", {"x": "1"})) == {"ok": 1}
+    assert sleeps == [2.0, 5.0]
+    sleeps.clear()
     with pytest.raises(FantraxError) as ei:
         asyncio.run(srv.FX._post("getPlayerStats", {"statusOrTeamFilter": "ALL_TAKEN"}))
-    assert ei.value.code == "INVALID_REQUEST" and len(posts) == 4
+    assert sleeps == [2.0, 5.0, 15.0] and len(posts) == 7
+    assert ei.value.code == "INVALID_REQUEST"
     assert '"statusOrTeamFilter": "ALL_TAKEN"' in str(ei.value)
     assert "cookie" not in str(ei.value).lower()
+
+
+def test_requests_are_paced(srv, monkeypatch):
+    import httpx
+    sleeps = []
+    clock = [100.0]
+
+    async def post(url, params=None, json=None):
+        return httpx.Response(200, json={"responses": [{"data": {}}]}, request=httpx.Request("POST", url))
+
+    async def fake_sleep(s):
+        sleeps.append(round(s, 3))
+        clock[0] += s
+
+    monkeypatch.setattr(srv.FX._http, "post", post)
+    monkeypatch.setattr("fantrax_mcp.fantrax_client.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("fantrax_mcp.fantrax_client.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(srv.FX, "_min_interval", 0.75)
+    monkeypatch.setattr(srv.FX, "_last_request", 0.0)
+
+    async def three():
+        for _ in range(3):
+            await srv.FX._post("getPlayerStats", {})
+    asyncio.run(three())
+    assert sleeps == [0.75, 0.75]          # first request immediate, then spaced
 
 
 def test_free_agents_entry_filtered_by_gp(srv, monkeypatch):
@@ -183,3 +213,56 @@ def test_free_agent_failure_is_partial(srv, monkeypatch):
     assert out["incomplete"] == ["FA:LAST_SEASON/goalies", "FA:LAST_SEASON/skaters"]
     assert all(e["scope"] == "free_agents" for e in out["errors"])
     assert any(t["code"] == "FA" for t in out["teams"])
+
+
+def test_failed_timeframe_falls_back_to_last_good_copy(srv, monkeypatch):
+    _fake_fantrax(srv, monkeypatch)
+    first = asyncio.run(srv.get_league_rosters(["YTD", "LAST_SEASON"]))     # stores good copies
+    assert "stale" not in first and "errors" not in first
+    srv.FX._cache = type(srv.FX._cache)()                                   # force refetch
+    _fake_fantrax(srv, monkeypatch, fail=("LAST_SEASON", "HOCKEY_SKATING"))
+    out = asyncio.run(srv.get_league_rosters(["YTD", "LAST_SEASON"]))
+    assert "incomplete" not in out
+    assert len(out["stale"]) == 1 and out["stale"][0].startswith("LAST_SEASON/skaters@")
+    assert out["errors"][0]["served_stale"] == out["stale"][0].split("@")[1]
+    sk = next(p for p in out["teams"][0]["players"] if p["fantrax_id"] == "sk1")
+    assert sk["stats"]["LAST_SEASON"]["GP"] == 81                           # value, not null
+
+
+def test_last_good_copy_too_old_is_not_used(srv, monkeypatch):
+    _fake_fantrax(srv, monkeypatch)
+    asyncio.run(srv.get_league_rosters(["YTD"]))
+    key = "stats|ALL_TAKEN|HOCKEY_SKATING|YTD"
+    ts, rows = srv.FX.last_good._mem[key]
+    srv.FX.last_good._mem[key] = (ts - 25 * 3600, rows)                    # YTD limit is 24 h
+    srv.FX._cache = type(srv.FX._cache)()
+    _fake_fantrax(srv, monkeypatch, fail=("YTD", "HOCKEY_SKATING"))
+    out = asyncio.run(srv.get_league_rosters(["YTD"]))
+    assert out["incomplete"] == ["YTD/skaters"] and "stale" not in out
+
+
+def test_rostered_pool_is_fetched_before_free_agents(srv, monkeypatch):
+    sent = _fake_fantrax(srv, monkeypatch)
+    asyncio.run(srv.get_league_rosters(["YTD"], include_free_agents=True))
+    filters = [d["statusOrTeamFilter"] for d in sent]
+    assert filters.index("ALL_AVAILABLE") > max(i for i, f in enumerate(filters) if f == "ALL_TAKEN")
+
+
+def test_team_list_failure_uses_last_good_list(srv, monkeypatch):
+    from fantrax_mcp.fantrax_client import FantraxClient
+    srv.FX.last_good.put("teams", {OC: "Onga Capitals"})
+
+    async def cached(ttl, method, **kw):
+        raise FantraxError(method, kw, {"code": "INVALID_REQUEST"})
+    monkeypatch.setattr(srv.FX, "cached", cached)
+    # call the real method (the fixture stubs FX.teams on the instance)
+    assert asyncio.run(FantraxClient.teams(srv.FX)) == {OC: "Onga Capitals"}
+
+
+def test_unrecoverable_fantrax_error_is_a_readable_tool_result(srv, monkeypatch):
+    async def teams():
+        raise FantraxError("getStandings", {"view": "COMBINED"}, {"code": "INVALID_REQUEST"})
+    monkeypatch.setattr(srv.FX, "teams", teams)
+    out = asyncio.run(srv.get_league_rosters(["YTD"]))
+    assert "INVALID_REQUEST" in out["error"]
+    assert out["request"] == {"method": "getStandings", "data": {"view": "COMBINED"}}
