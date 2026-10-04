@@ -25,6 +25,7 @@ from .nhl_client import NHLClient
 from .standings import find_team, slim_raw
 from .league_standings import build_standings
 from .league_data import blank_projection_gaps
+from .goalie_rule import min_for
 S = Settings.load()
 WEEKS = week_ranges(S.season_first_day, S.season_last_day, S.n_weeks)
 FX = FantraxClient(S)
@@ -35,12 +36,13 @@ Read-only access to the user's Fantrax NHL league (their team: {S.team_name or S
 League: H2H categories, {ROSTER_SIZE}-man roster cap plus {IR_SLOTS} IR slots, {S.n_weeks} weeks ending {S.season_last_day}.
 Skater cats: {', '.join(SKATER_CATS)} (PPG and PPA are separate). Goalie cats: {', '.join(GOALIE_CATS)}; no shutouts.
 Daily active lineup max {LINEUP_SLOTS}. Not every rostered player starts every day.
-Goalie categories count only with >= {GOALIE_MIN_GAMES} goalie games in the week.
+Goalie categories need a minimum of goalie games per scoring period; it varies by period
+(league_info.goalie_min_rule.by_period, read from Fantrax; null = no minimum).
 For add/drop questions, value = category impact x usable starts. Use lineup_capacity and
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.4.2")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.5.0")
 ET = ZoneInfo("America/New_York")
 
 
@@ -125,6 +127,28 @@ async def _week(week: int | None) -> tuple[int, date, date]:
     return (w, *weeks[w])
 
 
+async def _goalie_rule() -> dict:
+    """league_info.goalie_min_rule. If Fantrax cannot be read at all, the config value
+    applies to every period and source says so."""
+    weeks = await _weeks()
+    try:
+        return await FX.goalie_min_rule(max(weeks))
+    except Exception as ex:  # noqa: BLE001 — a missing rule must not sink the caller
+        return {"by_period": {str(k): GOALIE_MIN_GAMES for k in weeks},
+                "max_by_period": {str(k): None for k in weeks},
+                "penalty_if_missed": os.environ.get("GOALIE_MIN_PENALTY") or None,
+                "penalty_if_max": None,
+                "source": f"config fallback (GOALIE_MIN_GAMES={GOALIE_MIN_GAMES}); "
+                          f"Fantrax read failed: {type(ex).__name__}: {ex}"}
+
+
+async def _goalie_limits(week: int) -> tuple[int | None, int | None]:
+    """(min, max) goalie games for one scoring period; None = no limit."""
+    rule = await _goalie_rule()
+    mx = (rule.get("max_by_period") or {}).get(str(week))
+    return min_for(rule, week, GOALIE_MIN_GAMES), mx
+
+
 def roster_counts(players: list[dict]) -> dict:
     """Roster cap excludes IR: IR players fill the separate IR slots instead."""
     ir = sum(1 for p in players if p.get("roster_status") == "injured_reserve")
@@ -182,6 +206,8 @@ async def league_info() -> dict:
     (from Fantrax; includes double weeks)."""
     tid, name = await FX.resolve_team("me")
     weeks = await _weeks()
+    cw = current_week(weeks)
+    rule = await _goalie_rule()
     return {
         "my_team": {"id": tid, "code": team_code(tid), "name": name},
         "teams": await FX.teams(),
@@ -191,14 +217,9 @@ async def league_info() -> dict:
         "ir_slots": IR_SLOTS,
         "skater_categories": SKATER_CATS,
         "goalie_categories": GOALIE_CATS,
-        "goalie_min_games": GOALIE_MIN_GAMES,
-        "goalie_min_rule": {
-            "min_games": GOALIE_MIN_GAMES,
-            "penalty_if_missed": os.environ.get("GOALIE_MIN_PENALTY") or None,
-            "source": "GOALIE_MIN_PENALTY setting" if os.environ.get("GOALIE_MIN_PENALTY") else
-                      "not exposed by Fantrax's read API; set GOALIE_MIN_PENALTY from the league Rules page",
-        },
-        "current_week": current_week(weeks),
+        "goalie_min_games": min_for(rule, cw, GOALIE_MIN_GAMES),   # current week
+        "goalie_min_rule": rule,
+        "current_week": cw,
         "weeks": {k: [s.isoformat(), e.isoformat()] for k, (s, e) in weeks.items()},
         "timeframes": list((await FX.season_codes()).keys()),
     }
@@ -444,11 +465,12 @@ async def goalie_check(week: int | None = None, from_date: str | None = None,
         goalies.append({"name": p["name"], "nhl_team": p["nhl_team"], "team_games": games,
                         "start_share": sh, "est_starts": round(games * sh, 1)})
     est = round(sum(g["est_starts"] for g in goalies), 1)
+    g_min, _ = await _goalie_limits(w)
     return {
         "week": w, "range": [s.isoformat(), e.isoformat()],
         "team": {"id": tid, "code": team_code(tid), "name": tname},
-        "goalies": goalies, "est_total_starts": est, "minimum": GOALIE_MIN_GAMES,
-        "at_risk": est < GOALIE_MIN_GAMES + 0.5,
+        "goalies": goalies, "est_total_starts": est, "minimum": g_min,
+        "at_risk": g_min is not None and est < g_min + 0.5,
         "note": "Team games are a ceiling; confirm starters closer to game day.",
     }
 
@@ -501,6 +523,7 @@ async def league_lineup_capacity(week: int | None = None, from_date: str | None 
         s = max(s, date.fromisoformat(from_date))
     tbd = await _teams_by_day(s, e)
     teams = await FX.teams()
+    g_min, g_max = await _goalie_limits(w)
     try:
         so_far = await _goalie_gp_so_far(list(teams), week_start, e)
         so_far_err = None
@@ -521,11 +544,12 @@ async def league_lineup_capacity(week: int | None = None, from_date: str | None 
         rows.append({"code": team_code(tid), "name": name,
                      "starts": sim["total_starts"], "wasted": sim["total_wasted_games"],
                      "goalie_starts": by_pos.get("G", 0), "goalie_team_games": g_games,
-                     "goalie_min_met": by_pos.get("G", 0) >= GOALIE_MIN_GAMES,
+                     "goalie_min_met": g_min is None or by_pos.get("G", 0) >= g_min,
                      "goalie_gp_so_far": played,
-                     "goalie_gp_needed": None if played is None else max(0, GOALIE_MIN_GAMES - played)})
+                     "goalie_gp_needed": None if played is None else max(0, (g_min or 0) - played)})
     rows.sort(key=lambda r: -r.get("starts", -1))
-    out = {"week": w, "range": [s.isoformat(), e.isoformat()], "teams": rows,
+    out = {"week": w, "range": [s.isoformat(), e.isoformat()],
+           "goalie_min": g_min, "goalie_max": g_max, "teams": rows,
            "note": "goalie_starts is the lineup ceiling (team games that fit a G slot), "
                    "not confirmed starts; tandems will start fewer. goalie_gp_so_far counts "
                    "goalie games already played in an active G slot since the week began "

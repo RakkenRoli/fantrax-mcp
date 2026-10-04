@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from .cache import TTLCache
+from .goalie_rule import build_rule, parse_min_max, scrub_owners
 from .last_good import LastGood
 from .session_store import write_back
 from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP, TEAM_CODES
@@ -56,6 +57,10 @@ _TOI_RE = re.compile(r"^(\d+):(\d{2})$")
 
 
 log = logging.getLogger("fantrax_mcp")
+
+
+def _iso(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(ts))
 
 
 class FantraxError(RuntimeError):
@@ -194,7 +199,8 @@ class FantraxClient:
             err = body.get("pageError")
             if not err:
                 self._persist_cookies(r)
-                return body["responses"][0]["data"]
+                # Never let a GM's real name (teamHeadingInfo.owners) reach a tool result.
+                return scrub_owners(body["responses"][0]["data"])
             if err.get("code") == "WARNING_NOT_LOGGED_IN":
                 raise NotLoggedIn("Fantrax cookie expired — re-export it from the browser")
             log.warning("Fantrax %s on %s data=%s (attempt %d/%d)", err.get("code"), method,
@@ -421,6 +427,43 @@ class FantraxClient:
             if page >= pages or not rows:
                 break
         return out
+
+    # ---------- goalie min/max rule ----------
+    _RULE_TTL = 7 * 86400          # fetched once, refreshed weekly
+    _RULE_STALE_MAX = 60 * 86400   # last complete copy if a refresh fails
+
+    async def goalie_min_rule(self, n_periods: int) -> dict:
+        """Goalie games min/max for scoring periods 1..n_periods from
+        getTeamRosterInfo(view=GAMES_PER_POS, scoringPeriod=N). League-wide, so one team id
+        is enough. Calls go through the normal pacing (0.75 s apart, backoff on rejection).
+        A complete result is kept for a week, on disk too when FANTRAX_STATE_DIR is set, so
+        a restart does not re-fetch. Periods that fail are listed in missing_periods."""
+        key = f"goalie_min_rule:{n_periods}"
+        hit = self.last_good.get(key, self._RULE_TTL)
+        if hit:
+            return {**hit[1], "fetched": _iso(hit[0])}
+        tid = await self._any_team_id()
+        per: dict[int, dict] = {}
+        missing: list[int] = []
+        for n in range(1, n_periods + 1):
+            try:
+                data = await self.cached(self._RULE_TTL, "getTeamRosterInfo", teamId=tid,
+                                         scoringPeriod=str(n), view="GAMES_PER_POS")
+                per[n] = parse_min_max(data)
+            except (FantraxError, ValueError) as ex:
+                log.warning("goalie min rule: period %d failed: %s", n, ex)
+                missing.append(n)
+        if not missing:
+            rule = build_rule(per)
+            self.last_good.put(key, rule)
+            return {**rule, "fetched": _iso(time.time())}
+        old = self.last_good.get(key, self._RULE_STALE_MAX)
+        if old:
+            return {**old[1], "fetched": _iso(old[0]), "stale": True}
+        if not per:
+            raise FantraxError("getTeamRosterInfo", {"view": "GAMES_PER_POS"},
+                               {"code": "NO_PERIODS", "missing_periods": missing})
+        return {**build_rule(per), "missing_periods": missing, "fetched": _iso(time.time())}
 
     # ---------- daily lineups ----------
     async def day_periods(self) -> dict[date, int]:

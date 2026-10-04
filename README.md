@@ -57,7 +57,7 @@ It was built for, and tested on, one league. Before you set it up, check these:
 |---|---|
 | Fantrax **NHL** leagues with **head-to-head categories** scoring | Other sports or points-based scoring are not supported |
 | Any number of teams, any league id | **Scoring categories** are pinned in `fantrax_mcp/categories.py` (skaters G, A, PIM, SOG, PPG, PPA, Hit, Blk, Tk, FOW, TOI; goalies W, GAA, SV, SV%). With a different set, `session_health` reports a category mismatch until you edit that file |
-| Roster size and IR slots (`ROSTER_SIZE`, `IR_SLOTS`) | **Daily lineup slots** (3 C, 3 LW, 3 RW, 6 D, 2 G) and the 3-game **goalie minimum** live in `fantrax_mcp/config.py` |
+| Roster size and IR slots (`ROSTER_SIZE`, `IR_SLOTS`); **goalie games min/max per scoring period** read from Fantrax | **Daily lineup slots** (3 C, 3 LW, 3 RW, 6 D, 2 G) live in `fantrax_mcp/config.py`; `GOALIE_MIN_GAMES` there is only the fallback when Fantrax's rule cannot be read |
 | Season calendar read from Fantrax | **Team codes**: `TEAM_CODES` in `categories.py` maps the author's league. For your league, fill in your own team ids and codes (`league_info` lists the ids), or empty it: outputs then show Fantrax's own short names, and you look teams up by name or id |
 
 Making those settings configurable is on the to-do list; pull requests are welcome.
@@ -199,7 +199,7 @@ Settings are environment variables, read from `/etc/fantrax-mcp/env` by the serv
 | `FANTRAX_STATE_DIR` | | (memory only) | Where last good copies of big pulls are kept across restarts; the shipped unit sets `/var/lib/fantrax-mcp` |
 | `MCP_RESULT_FORMAT` | | `text` | How results are sent: `text` = one compact JSON text block; `structured` = only `structuredContent`; `both` = the MCP SDK default (structured plus an indented copy, over twice the size) |
 | `FANTRAX_COOKIE_WRITEBACK` | | off | `1` = save cookies Fantrax refreshes back to the cookie file (see below) |
-| `GOALIE_MIN_PENALTY` | | | What your league does when a team misses the goalie minimum, copied from the Rules page (e.g. `"GAA and SV% count as losses"`). Returned by `league_info` |
+| `GOALIE_MIN_PENALTY` | | | Fallback only: penalty text used when the goalie rule cannot be read from Fantrax (normally `league_info` returns Fantrax's own `minNote`) |
 
 ---
 

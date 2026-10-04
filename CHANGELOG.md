@@ -2,6 +2,31 @@
 
 Changes to tool output that client code should know about. Newest first.
 
+## 0.5.0
+
+Breaking changes for the website code:
+
+- **`league_info.goalie_min_rule`** is now read from Fantrax
+  (`getTeamRosterInfo` `view=GAMES_PER_POS`, `scoringPeriod` 1..N):
+  `{"by_period": {"1": 2, "2": 3, ...}, "max_by_period": {"1": null, ...},
+  "penalty_if_missed": <minNote>, "penalty_if_max": <maxNote>, "source": "fantrax",
+  "fetched": "2026-10-04T18:00Z"}`. `null` = "No min" / "No max".
+  `min_games` is gone. Optional keys: `stale: true` (a refresh failed, last complete copy up
+  to 60 days old), `missing_periods: [...]` (those periods use the config fallback). If
+  Fantrax cannot be read at all, every period gets `GOALIE_MIN_GAMES` and `source` starts
+  with `"config fallback"`.
+- `league_info.goalie_min_games` is now the **current week's** minimum (may be `null`).
+- `league_lineup_capacity`: `goalie_min_met` and `goalie_gp_needed` use the week's
+  `by_period` value (no minimum -> met / needed 0). New top-level `goalie_min`, `goalie_max`.
+- `goalie_check`: `minimum` is the week's value (may be `null`; then `at_risk` is false).
+
+Other:
+
+- `teamHeadingInfo.owners` (GMs' real names) is stripped from every Fantrax response,
+  `fantrax_raw` included.
+- The rule is fetched once (25 paced calls, ~20 s on first use) and kept for a week,
+  on disk too when `FANTRAX_STATE_DIR` is set.
+
 ## 0.4.2
 
 Breaking changes for the website code:
