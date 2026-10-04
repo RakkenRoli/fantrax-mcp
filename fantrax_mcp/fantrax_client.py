@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 
 from .cache import TTLCache
-from .cookie_store import write_back
+from .session_store import write_back
 from .categories import GOALIE_COMPONENT_SCIP, GOALIE_SCIP, TEAM_CODES
 from .config import Settings, nhl_abbrev
 from .league_data import (GOALIE_RAW, SKATER_RAW, injury_status, owner_team_id,
