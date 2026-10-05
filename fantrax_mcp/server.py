@@ -44,7 +44,18 @@ evaluate_add_drop, not raw team game counts. No write actions exist; the user ma
 
 mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.5.0")
 ET = ZoneInfo("America/New_York")
+DEBUG_TOOLS = os.environ.get("DEBUG_TOOLS") == "1"
 
+
+def debug_tool():
+    """Register an MCP tool only when DEBUG_TOOLS=1.
+
+    Without the flag the function stays importable for local scripts and
+    tests, but it is not exposed through the server (or the Funnel URL).
+    """
+    if DEBUG_TOOLS:
+        return tool()
+    return lambda fn: fn
 
 def fetch_stamp() -> dict:
     """When the data was fetched. nhl_date is the US-Eastern calendar date, which is how the
@@ -833,7 +844,7 @@ async def session_health() -> dict:
     return await _health()
 
 
-@tool()
+@debug_tool()
 async def fantrax_raw(method: str, data: dict | None = None, period: int | None = None,
                       label_categories: bool = True, max_kb: int = 400) -> dict:
     """Debug: call an allowlisted READ-ONLY Fantrax fxpa method and return the raw response.
