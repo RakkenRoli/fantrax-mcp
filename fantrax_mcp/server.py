@@ -24,7 +24,7 @@ from .lineup import LineupPlayer, plan_week, simulate_week, starts_by_position
 from .nhl_client import NHLClient
 from .standings import find_team, slim_raw
 from .league_standings import build_standings
-from .league_data import blank_projection_gaps
+from .league_data import attribute_day, blank_projection_gaps
 from .goalie_rule import min_for
 S = Settings.load()
 WEEKS = week_ranges(S.season_first_day, S.season_last_day, S.n_weeks)
@@ -42,7 +42,7 @@ For add/drop questions, value = category impact x usable starts. Use lineup_capa
 evaluate_add_drop, not raw team game counts. No write actions exist; the user makes moves in Fantrax.
 """.strip()
 
-mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.5.0")
+mcp = MCPServer("fantrax", instructions=INSTRUCTIONS, version="0.6.0")
 ET = ZoneInfo("America/New_York")
 DEBUG_TOOLS = os.environ.get("DEBUG_TOOLS") == "1"
 
@@ -777,10 +777,13 @@ async def lineup_plan(week: int | None = None, from_date: str | None = None) -> 
 @tool()
 async def get_daily_player_stats(date: str) -> dict:  # noqa: A002 — public arg name
     """Every NHL player who played on `date` (YYYY-MM-DD, US-Eastern game date), rostered or
-    free agent, one row each: fantrax_id, name, positions, nhl_team, owner (team code or
-    "FA"), slot_status that day for rostered players (active / bench / ir), and raw stats.
-    Skaters: G A PIM SOG PPG PPA Hit Blk Tk FOW TOI (TOI decimal minutes).
-    Goalies: W GA SA SV MIN (raw components, no rates)."""
+    free agent, one row each: fantrax_id, name, positions, nhl_team, and owner and slot as
+    of `date`: owner = the team that had the player on that date (team code) or "FA",
+    slot_status = his slot on that team that date (active / bench / ir; null only for FA).
+    Later drops, adds and trades do not change a past date's rows. Raw stats: skaters
+    G A PIM SOG PPG PPA Hit Blk Tk FOW TOI (TOI decimal minutes); goalies W GA SA SV MIN
+    (no rates). If a team's roster for the date cannot be read, `complete` is false, that
+    team is listed in `slot_status_errors`, and players who cannot be placed get owner null."""
     d = _parse_day(date)
     ttl = _day_ttl(d)
     sk = await FX.stats_rows("ALL", "HOCKEY_SKATING", day=d, ttl=ttl,
@@ -788,32 +791,49 @@ async def get_daily_player_stats(date: str) -> dict:  # noqa: A002 — public ar
     go = await FX.stats_rows("ALL", "POS_201", day=d, standard=True, ttl=ttl,
                              stop_after_idle_pages=2, played_key="GP")
     played = [r for r in sk + go if (r["stats"].get("GP") or 0) > 0]
-    owners = sorted({r["owner_team_id"] for r in played if r["owner_team_id"]})
-    statuses = await _gather([FX.roster_on(tid, d, ttl) for tid in owners])
-    slot_of: dict[str, dict[str, str]] = {}
-    errors = {}
-    for tid, st in zip(owners, statuses):
+
+    # Every team's roster AS OF d (Fantrax daily period), not only today's owners.
+    team_ids = sorted(await FX.teams())
+    fetched = await _gather([FX.roster_on(tid, d, ttl) for tid in team_ids])
+    day_rosters: dict[str, dict[str, str]] = {}
+    errors: dict[str, str] = {}
+    for tid, st in zip(team_ids, fetched):
         if isinstance(st, Exception):
-            errors[team_code(tid)] = f"{type(st).__name__}: {st}"
+            errors[team_code(tid) or tid] = f"{type(st).__name__}: {st}"
         else:
-            slot_of[tid] = st
+            day_rosters[tid] = st
+    owner_of, conflicts = attribute_day(day_rosters)
+
     rows = []
     for r in played:
-        tid = r["owner_team_id"]
+        pid = r["fantrax_id"]
         goalie = "G" in r["positions"]
+        hit = owner_of.get(pid)
+        if hit:
+            owner, slot = team_code(hit[0]) or hit[0], hit[1]
+        elif errors:
+            owner, slot = None, None          # a team's roster is missing: cannot say FA
+        else:
+            owner, slot = "FA", None
         rows.append({
-            "fantrax_id": r["fantrax_id"], "name": r["name"], "positions": r["positions"],
-            "nhl_team": r["nhl_team"], "owner": team_code(tid) if tid else "FA",
-            "slot_status": slot_of.get(tid, {}).get(r["fantrax_id"]) if tid else None,
+            "fantrax_id": pid, "name": r["name"], "positions": r["positions"],
+            "nhl_team": r["nhl_team"], "owner": owner, "slot_status": slot,
             "stats": _pick(r["stats"], DAILY_GOALIE_OUT if goalie else SKATER_CATS),
         })
-    rows.sort(key=lambda x: (x["owner"] == "FA", x["owner"], x["name"] or ""))
-    out = {"date": d.isoformat(), "players": rows,
+    rows.sort(key=lambda x: (x["owner"] is None, x["owner"] == "FA", x["owner"] or "",
+                             x["name"] or ""))
+    out = {"date": d.isoformat(), "attribution": "as_of_date", "complete": not errors,
+           "players": rows,
            "counts": {"skaters": sum(1 for x in rows if "G" not in x["positions"]),
                       "goalies": sum(1 for x in rows if "G" in x["positions"]),
-                      "rostered": sum(1 for x in rows if x["owner"] != "FA")}}
+                      "rostered": sum(1 for x in rows if x["owner"] not in ("FA", None))}}
     if errors:
         out["slot_status_errors"] = errors
+    played_ids = {r["fantrax_id"] for r in played}
+    clashes = {pid: [team_code(t) or t for t in ts] for pid, ts in conflicts.items()
+               if pid in played_ids}
+    if clashes:
+        out["attribution_conflicts"] = clashes
     return out
 
 

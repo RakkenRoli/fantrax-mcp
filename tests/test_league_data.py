@@ -209,3 +209,110 @@ def test_goalie_gp_so_far(srv, monkeypatch):
     got = asyncio.run(srv._goalie_gp_so_far([OC, RSD, GTX], start, start + timedelta(days=6)))
     # 2 days so far; g3 played but sat on GTX's bench, so it does not count.
     assert got == {OC: 0, RSD: 2, GTX: 2}
+
+
+# ------------------------------------------- 0.6.0: owner and slot as of the date
+UV, KWC, BVB = "mc5s8r57mtr5w0js", "r27c7dt2mtr5w0js", "089wx6w1mtr5w0js"
+SK1 = {"GP": 1, "G": 0, "A": 1, "PIM": 0, "SOG": 3, "PPG": 0, "PPA": 0, "Hit": 1,
+       "Blk": 0, "Tk": 0, "FOW": 0, "TOI": 16.5}
+
+
+def _asof_server(monkeypatch, rosters_by_day, stats_by_day, failing=()):
+    """rosters_by_day: {date: {team_id: {pid: slot}}}; stats rows carry TODAY's owner."""
+    from fantrax_mcp import server
+
+    async def teams():
+        return {GTX: "Gazdagréti Taxisok", UV: "Utah Vultures", KWC: "Kistarcsa Wildcocks",
+                BVB: "BVB Eishockeyverein", OC: "Onga Capitals"}
+
+    async def roster_on(tid, d, ttl=300):
+        if tid in failing:
+            raise RuntimeError("Fantrax returned day period 9, asked for 2")
+        return rosters_by_day[d].get(tid, {})
+
+    async def stats_rows(flt, group, timeframe=None, day=None, standard=False, **kw):
+        return [] if group == "POS_201" else stats_by_day[day]
+
+    monkeypatch.setattr(server.FX, "teams", teams)
+    monkeypatch.setattr(server.FX, "roster_on", roster_on)
+    monkeypatch.setattr(server.FX, "stats_rows", stats_rows)
+    return server
+
+
+def _week1(monkeypatch, failing=()):
+    """Week 1 cases from the spec. Today (Oct 6) Pettersson, Buchnevich, Bjorkstrand and
+    Sandin Pellikka are FA; Perfetti is GTX and Skinner BVB but were FA on Oct 2."""
+    d29, d02 = date(2026, 9, 29), date(2026, 10, 2)
+    rosters = {
+        d29: {UV: {"pett": "active"}, GTX: {"buch": "active"}},
+        d02: {GTX: {"buch": "active", "bjo": "active"}, KWC: {"asp": "active"},
+              UV: {"pett": "bench"}},
+    }
+    stats = {
+        d29: [_rec("pett", "Elias Pettersson", ["C"], "VAN", None, SK1)],
+        d02: [_rec("buch", "Pavel Buchnevich", ["LW", "RW"], "STL", None, SK1),
+              _rec("bjo", "Oliver Bjorkstrand", ["RW"], "SEA", None, SK1),
+              _rec("asp", "Axel Sandin Pellikka", ["D"], "DET", None, SK1),
+              _rec("perf", "Cole Perfetti", ["C", "LW"], "WPG", GTX, SK1),
+              _rec("skin", "Stuart Skinner", ["G"], "EDM", BVB, SK1),
+              _rec("eich", "Jack Eichel", ["C"], "VGK", OC, SK1)],
+    }
+    return _asof_server(monkeypatch, rosters, stats, failing)
+
+
+def test_dropped_after_date_keeps_that_dates_team(monkeypatch):
+    srv = _week1(monkeypatch)
+    by = {p["name"]: p for p in asyncio.run(srv.get_daily_player_stats("2026-09-29"))["players"]}
+    assert (by["Elias Pettersson"]["owner"], by["Elias Pettersson"]["slot_status"]) == ("UV", "active")
+    out = asyncio.run(srv.get_daily_player_stats("2026-10-02"))
+    by = {p["name"]: p for p in out["players"]}
+    for name, team in [("Pavel Buchnevich", "GTX"), ("Oliver Bjorkstrand", "GTX"),
+                       ("Axel Sandin Pellikka", "KWC")]:
+        assert (by[name]["owner"], by[name]["slot_status"]) == (team, "active"), name
+    assert out["complete"] is True and out["attribution"] == "as_of_date"
+
+
+def test_added_after_date_is_fa_on_that_date(monkeypatch):
+    srv = _week1(monkeypatch)
+    by = {p["name"]: p for p in asyncio.run(srv.get_daily_player_stats("2026-10-02"))["players"]}
+    for name in ("Cole Perfetti", "Stuart Skinner"):
+        assert (by[name]["owner"], by[name]["slot_status"]) == ("FA", None), name
+
+
+def test_owned_on_date_never_has_null_slot(monkeypatch):
+    srv = _week1(monkeypatch)
+    for day in ("2026-09-29", "2026-10-02"):
+        out = asyncio.run(srv.get_daily_player_stats(day))
+        assert all((p["owner"] == "FA") == (p["slot_status"] is None) for p in out["players"])
+        assert out["counts"]["rostered"] == sum(p["owner"] != "FA" for p in out["players"])
+
+
+def test_stats_untouched_by_attribution(monkeypatch):
+    srv = _week1(monkeypatch)
+    out = asyncio.run(srv.get_daily_player_stats("2026-10-02"))
+    expect = {k: v for k, v in SK1.items() if k != "GP"}
+    assert all(p["stats"] == expect for p in out["players"] if "G" not in p["positions"])
+
+
+def test_failed_team_roster_marks_result_incomplete(monkeypatch):
+    srv = _week1(monkeypatch, failing=(KWC,))
+    out = asyncio.run(srv.get_daily_player_stats("2026-10-02"))
+    by = {p["name"]: p for p in out["players"]}
+    assert out["complete"] is False and "KWC" in out["slot_status_errors"]
+    assert by["Axel Sandin Pellikka"]["owner"] is None      # unknown, not silently FA
+    assert by["Pavel Buchnevich"]["owner"] == "GTX"           # other teams still placed
+
+
+def test_traded_on_date_goes_to_active_slot(monkeypatch):
+    d = date(2026, 10, 3)
+    srv = _asof_server(monkeypatch, {d: {GTX: {"x": "bench"}, UV: {"x": "active"}}},
+                       {d: [_rec("x", "Traded Guy", ["C"], "TOR", GTX, SK1)]})
+    out = asyncio.run(srv.get_daily_player_stats("2026-10-03"))
+    assert (out["players"][0]["owner"], out["players"][0]["slot_status"]) == ("UV", "active")
+    assert sorted(out["attribution_conflicts"]["x"]) == ["GTX", "UV"]
+
+
+def test_attribute_day_pure():
+    from fantrax_mcp.league_data import attribute_day
+    owner, clash = attribute_day({"b": {"p": "ir", "q": "bench"}, "a": {"p": "ir"}})
+    assert owner == {"p": ("a", "ir"), "q": ("b", "bench")} and clash == {"p": ["a", "b"]}

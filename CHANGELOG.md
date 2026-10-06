@@ -2,6 +2,25 @@
 
 Changes to tool output that client code should know about. Newest first.
 
+## 0.6.0
+
+Behaviour fix, `get_daily_player_stats(date)`:
+
+- **`owner` and `slot_status` are now as of `date`.** They come from every team's Fantrax
+  roster for that day (daily lineup period), no longer from today's owner on the stats row.
+  A player dropped or traded after the date keeps that date's team and slot; a player added
+  after the date is `FA` on it. Stats are unchanged. Re-fetching a past date returns the
+  same attribution on any later day.
+- New top-level keys: `attribution: "as_of_date"` (marks the fixed behaviour),
+  `complete` (false if any team's roster for the date could not be read), optional
+  `attribution_conflicts` ({fantrax_id: [team codes]}, a player on two rosters that day;
+  he is given to the team where his slot ranks highest, active > bench > ir).
+- `owner` may be `null` (only when `complete` is false): the player could not be placed
+  because a team's roster is missing. Treat that day as not final and re-fetch.
+- `slot_status` is null only when `owner` is `FA` or null.
+- `counts.rostered` excludes `FA` and `null` owners.
+- One `getTeamRosterInfo` call per team per date (was: per current owner).
+
 ## 0.5.0
 
 Breaking changes for the website code:

@@ -31,7 +31,7 @@ in charge in Fantrax; the server just gives Claude accurate numbers to reason wi
 | `get_league_rosters(timeframes, include_free_agents, fa_require_ytd_gp)` | Every roster in one call, with raw season totals per timeframe; optionally free agents (code `FA`) as a baseline |
 | `get_free_agents(position, ...)` | Available players, sortable by any category |
 | `get_goalie_stats(team)` | Goalie W / GAA / SV / SV% plus goals against, shots against and minutes |
-| `get_daily_player_stats(date)` | Everyone who played on a date: owner, lineup slot that day, raw stats |
+| `get_daily_player_stats(date)` | Everyone who played on a date: owner and lineup slot as of that date, raw stats |
 | `get_nhl_schedule(start, end)` | NHL games per night and per team |
 | `get_fantasy_week(week)` | Week dates, games per NHL team, light nights |
 | `lineup_capacity(week, team)` | Daily lineup simulation: usable starts, games wasted on the bench, open slots |

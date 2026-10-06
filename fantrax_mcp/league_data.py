@@ -146,6 +146,32 @@ def roster_day_status(resp: dict, expect_period: int | None = None) -> dict[str,
     return out
 
 
+_SLOT_RANK = {"active": 0, "bench": 1, "ir": 2}
+
+
+def attribute_day(day_rosters: dict[str, dict[str, str]]
+                  ) -> tuple[dict[str, tuple[str, str]], dict[str, list[str]]]:
+    """Invert every team's roster for ONE date into {fantrax_id: (team_id, slot)}.
+
+    day_rosters = {team_id: roster_day_status(...)} for that date. Ownership comes only from
+    these date rosters, never from the stats row's Sta cell (that is today's owner).
+    A player on two rosters that day (trade on the date) goes to the team where his slot
+    ranks highest (active > bench > ir, then team id for a stable result); the clash is
+    reported as {fantrax_id: [team ids]}."""
+    seen: dict[str, list[tuple[str, str]]] = {}
+    for tid in sorted(day_rosters):
+        for pid, slot in (day_rosters[tid] or {}).items():
+            seen.setdefault(pid, []).append((tid, slot))
+    owner: dict[str, tuple[str, str]] = {}
+    conflicts: dict[str, list[str]] = {}
+    for pid, hits in seen.items():
+        hits.sort(key=lambda h: (_SLOT_RANK.get(h[1], 9), h[0]))
+        owner[pid] = hits[0]
+        if len(hits) > 1:
+            conflicts[pid] = [t for t, _ in hits]
+    return owner, conflicts
+
+
 def blank_projection_gaps(stats: dict, timeframe: str) -> dict:
     """Projections carry Tk = 0 and TOI = '' for everyone: report both as None."""
     if timeframe.startswith("PROJ"):
