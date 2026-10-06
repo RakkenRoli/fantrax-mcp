@@ -18,6 +18,7 @@ os.environ["FANTRAX_TEAM_NAME"] = "Gazdagréti Taxisok"   # the team in the comm
 os.environ["FANTRAX_COOKIE_FILE"] = str(DUMMY_SESSION)
 os.environ.pop("FANTRAX_TEAM_ID", None)
 os.environ.pop("MCP_AUTH_TOKEN", None)
+os.environ["MCP_ALLOW_NO_AUTH"] = "1"         # tests run the server without auth on purpose
 os.environ.pop("FANTRAX_COOKIE_WRITEBACK", None)   # tests never persist cookies
 os.environ.pop("FANTRAX_STATE_DIR", None)          # last-good copies stay in memory
 os.environ["FANTRAX_MIN_INTERVAL"] = "0"

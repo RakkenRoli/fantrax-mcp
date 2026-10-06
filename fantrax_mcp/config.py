@@ -1,6 +1,7 @@
 """Settings and league constants."""
 from __future__ import annotations
 
+import sys
 import os
 import re
 from dataclasses import dataclass
@@ -41,6 +42,25 @@ def _req(name: str) -> str:
     return val
 
 
+def _auth_token() -> str | None:
+    """MCP_AUTH_TOKEN is required: the server is published through Tailscale Funnel.
+
+    MCP_ALLOW_NO_AUTH=1 turns this off for local tests only.
+    """
+    tok = (os.environ.get("MCP_AUTH_TOKEN") or "").strip()
+    if tok:
+        if len(tok) < 24:
+            raise RuntimeError("MCP_AUTH_TOKEN is too short (need at least 24 characters)")
+        return tok
+    if os.environ.get("MCP_ALLOW_NO_AUTH") == "1":
+        print("WARNING: MCP_ALLOW_NO_AUTH=1, server runs WITHOUT auth", file=sys.stderr)
+        return None
+    raise RuntimeError(
+        "Missing required env var MCP_AUTH_TOKEN (the server is public through Tailscale "
+        "Funnel). Set MCP_ALLOW_NO_AUTH=1 only for local tests."
+    )
+
+
 @dataclass(frozen=True)
 class Settings:
     league_id: str
@@ -63,8 +83,8 @@ class Settings:
             team_name=os.environ.get("FANTRAX_TEAM_NAME", "").strip().strip('"'),
             team_id=os.environ.get("FANTRAX_TEAM_ID") or None,
             cookie_file=os.environ.get("FANTRAX_COOKIE_FILE", "fantrax_cookies.json"),
-            auth_token=os.environ.get("MCP_AUTH_TOKEN") or None,
-            host=os.environ.get("MCP_HOST", "0.0.0.0"),
+            auth_token=_auth_token(),
+            host=os.environ.get("MCP_HOST", "127.0.0.1"),
             port=int(os.environ.get("MCP_PORT", "8765")),
             season_first_day=date.fromisoformat(os.environ.get("SEASON_FIRST_DAY", "2026-10-06")),
             season_last_day=date.fromisoformat(os.environ.get("SEASON_LAST_DAY", "2027-04-04")),
